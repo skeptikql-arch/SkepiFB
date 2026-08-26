@@ -1,0 +1,11 @@
+name: SkepiFB
+main: me.skepi.skepifb.SkepiFBPlugin
+version: 1.0.0
+api-version: 1.21
+description: FastBuilder arena foundation for Paper 1.21.8
+softdepend: [LuckPerms, WorldEdit, Citizens]
+commands:
+  fb:
+    description: Manage SkepiFB arenas
+    usage: /fb <add|remove|list|join|leave>
+    aliases: [fastbuilder]

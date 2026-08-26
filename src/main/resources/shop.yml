@@ -1,0 +1,2610 @@
+﻿# SkepiFB shop configuration file
+#
+# Defines every cosmetic shop GUI (block shop, tools, reset animation, firework
+# color, practice blocks, rankups, island shop, tags). All values below are
+# live-editable - run /fb reload after saving changes and every open shop menu
+# updates immediately, no restart needed.
+#
+# Structure: shops -> <shop_id> -> categories -> <category_key> -> items -> <item_key>
+#   title      - inventory title for this shop (supports & color codes)
+#   size       - inventory size, must be a multiple of 9 (block shop/practice/island: 54, most others: 27)
+#   page-size  - (block shop only) items per page before the category selector pages
+#   category-selector - (block shop only) the category-picker screen; each entry needs
+#                        slot, item (a Material) and name
+#   categories - one entry per category; each category has a title and an items map
+#
+# Each item under "items" supports:
+#   material - the Bukkit Material purchased/equipped (must be a valid full block for
+#              block/practice shops - avoid anything with gravity, slowness, or damage
+#              side effects, since players build and stand on these)
+#   name     - display name shown in the shop (supports & color codes)
+#   price    - cost in coins to purchase (equipping is free once owned)
+#   slot     - fixed slot override; most categories auto-place items in reading order,
+#              so 99 (meaning "auto") is the normal value here - only change this if you
+#              need to pin a specific item to a specific slot
+#   lore     - list of description lines shown on hover (supports & color codes)
+#   default  - true marks this item as the shop's fallback/starting item, used whenever
+#              a player has nothing equipped for this shop; at most one per shop
+#
+shops:
+  block_shop:
+    title: "&dBlock Shop"
+    size: 54
+    page-size: 21
+    category-selector:
+      sandstone:
+        slot: 9
+        item: SANDSTONE
+        name: "&eSandstone Blocks"
+        lore:
+          - "&7Browse sandstone blocks"
+        action: category
+        category: sandstone
+      colored:
+        slot: 11
+        item: RED_WOOL
+        name: "&bColored Blocks"
+        lore:
+          - "&7Browse colorful blocks"
+        action: category
+        category: colored
+      wood:
+        slot: 13
+        item: OAK_PLANKS
+        name: "&6Wood"
+        lore:
+          - "&7Browse wood blocks"
+        action: category
+        category: wood
+      stone:
+        slot: 15
+        item: STONE
+        name: "&7Stone Blocks"
+        lore:
+          - "&7Browse stone and brick blocks"
+        action: category
+        category: stone
+      variety:
+        slot: 17
+        item: OBSIDIAN
+        name: "&5Variety"
+        lore:
+          - "&7Browse special full blocks"
+        action: category
+        category: variety
+    categories:
+      sandstone:
+        title: "&eSandstone Blocks"
+        items:
+          sandstone:
+            material: SANDSTONE
+            name: "&fSandstone"
+            price: 10
+            slot: 10
+            lore:
+              - "&7A classic sandstone block"
+          chiseled_sandstone:
+            material: CHISELED_SANDSTONE
+            name: "&fChiseled Sandstone"
+            price: 15
+            slot: 11
+            lore:
+              - "&7Decorative sandstone block"
+          cut_sandstone:
+            material: CUT_SANDSTONE
+            name: "&fCut Sandstone"
+            price: 14
+            slot: 12
+            lore:
+              - "&7Smooth sandstone slab style"
+          smooth_sandstone:
+            material: SMOOTH_SANDSTONE
+            name: "&fSmooth Sandstone"
+            price: 14
+            slot: 13
+            lore:
+              - "&7Refined sandstone"
+          red_sandstone:
+            material: RED_SANDSTONE
+            name: "&cRed Sandstone"
+            price: 12
+            slot: 14
+            lore:
+              - "&7A reddish sandstone block"
+          cut_red_sandstone:
+            material: CUT_RED_SANDSTONE
+            name: "&cCut Red Sandstone"
+            price: 14
+            slot: 15
+            lore:
+              - "&7Smooth red sandstone"
+          chiseled_red_sandstone:
+            material: CHISELED_RED_SANDSTONE
+            name: "&cChiseled Red Sandstone"
+            price: 18
+            slot: 16
+            lore:
+              - "&7Decorative red sandstone"
+          smooth_red_sandstone:
+            material: SMOOTH_RED_SANDSTONE
+            name: "&cSmooth Red Sandstone"
+            price: 16
+            slot: 17
+            lore:
+              - "&7Refined red sandstone"
+      colored:
+        title: "&bColored Blocks"
+        items:
+          white_wool:
+            material: WHITE_WOOL
+            name: "&fWhite Wool"
+            price: 5
+            slot: 10
+            lore:
+              - "&7Colorful wool block"
+          orange_wool:
+            material: ORANGE_WOOL
+            name: "&6Orange Wool"
+            price: 5
+            slot: 11
+            lore:
+              - "&7Colorful wool block"
+          magenta_wool:
+            material: MAGENTA_WOOL
+            name: "&dMagenta Wool"
+            price: 5
+            slot: 12
+            lore:
+              - "&7Colorful wool block"
+          light_blue_wool:
+            material: LIGHT_BLUE_WOOL
+            name: "&9Light Blue Wool"
+            price: 5
+            slot: 13
+            lore:
+              - "&7Colorful wool block"
+          yellow_wool:
+            material: YELLOW_WOOL
+            name: "&eYellow Wool"
+            price: 5
+            slot: 14
+            lore:
+              - "&7Colorful wool block"
+          lime_wool:
+            material: LIME_WOOL
+            name: "&aLime Wool"
+            price: 5
+            slot: 15
+            lore:
+              - "&7Colorful wool block"
+          pink_wool:
+            material: PINK_WOOL
+            name: "&dPink Wool"
+            price: 5
+            slot: 16
+            lore:
+              - "&7Colorful wool block"
+          gray_wool:
+            material: GRAY_WOOL
+            name: "&7Gray Wool"
+            price: 5
+            slot: 17
+            lore:
+              - "&7Colorful wool block"
+          light_gray_wool:
+            material: LIGHT_GRAY_WOOL
+            name: "&7Light Gray Wool"
+            price: 5
+            slot: 18
+            lore:
+              - "&7Colorful wool block"
+          cyan_wool:
+            material: CYAN_WOOL
+            name: "&bCyan Wool"
+            price: 5
+            slot: 19
+            lore:
+              - "&7Colorful wool block"
+          purple_wool:
+            material: PURPLE_WOOL
+            name: "&5Purple Wool"
+            price: 5
+            slot: 20
+            lore:
+              - "&7Colorful wool block"
+          blue_wool:
+            material: BLUE_WOOL
+            name: "&9Blue Wool"
+            price: 5
+            slot: 21
+            lore:
+              - "&7Colorful wool block"
+          brown_wool:
+            material: BROWN_WOOL
+            name: "&6Brown Wool"
+            price: 5
+            slot: 22
+            lore:
+              - "&7Colorful wool block"
+          green_wool:
+            material: GREEN_WOOL
+            name: "&2Green Wool"
+            price: 5
+            slot: 23
+            lore:
+              - "&7Colorful wool block"
+          red_wool:
+            material: RED_WOOL
+            name: "&cRed Wool"
+            price: 5
+            slot: 24
+            lore:
+              - "&7Colorful wool block"
+          black_wool:
+            material: BLACK_WOOL
+            name: "&0Black Wool"
+            price: 5
+            slot: 25
+            lore:
+              - "&7Colorful wool block"
+          white_concrete:
+            material: WHITE_CONCRETE
+            name: "&fWhite Concrete"
+            price: 8
+            slot: 28
+            lore:
+              - "&7Solid white concrete"
+          orange_concrete:
+            material: ORANGE_CONCRETE
+            name: "&6Orange Concrete"
+            price: 8
+            slot: 29
+            lore:
+              - "&7Solid orange concrete"
+          magenta_concrete:
+            material: MAGENTA_CONCRETE
+            name: "&dMagenta Concrete"
+            price: 8
+            slot: 30
+            lore:
+              - "&7Solid magenta concrete"
+          light_blue_concrete:
+            material: LIGHT_BLUE_CONCRETE
+            name: "&9Light Blue Concrete"
+            price: 8
+            slot: 31
+            lore:
+              - "&7Solid light blue concrete"
+          yellow_concrete:
+            material: YELLOW_CONCRETE
+            name: "&eYellow Concrete"
+            price: 8
+            slot: 32
+            lore:
+              - "&7Solid yellow concrete"
+          lime_concrete:
+            material: LIME_CONCRETE
+            name: "&aLime Concrete"
+            price: 8
+            slot: 33
+            lore:
+              - "&7Solid lime concrete"
+          pink_concrete:
+            material: PINK_CONCRETE
+            name: "&dPink Concrete"
+            price: 8
+            slot: 34
+            lore:
+              - "&7Solid pink concrete"
+          gray_concrete:
+            material: GRAY_CONCRETE
+            name: "&7Gray Concrete"
+            price: 8
+            slot: 35
+            lore:
+              - "&7Solid gray concrete"
+          light_gray_concrete:
+            material: LIGHT_GRAY_CONCRETE
+            name: "&7Light Gray Concrete"
+            price: 8
+            slot: 36
+            lore:
+              - "&7Solid light gray concrete"
+          cyan_concrete:
+            material: CYAN_CONCRETE
+            name: "&bCyan Concrete"
+            price: 8
+            slot: 37
+            lore:
+              - "&7Solid cyan concrete"
+          purple_concrete:
+            material: PURPLE_CONCRETE
+            name: "&5Purple Concrete"
+            price: 8
+            slot: 38
+            lore:
+              - "&7Solid purple concrete"
+          blue_concrete:
+            material: BLUE_CONCRETE
+            name: "&9Blue Concrete"
+            price: 8
+            slot: 39
+            lore:
+              - "&7Solid blue concrete"
+          brown_concrete:
+            material: BROWN_CONCRETE
+            name: "&6Brown Concrete"
+            price: 8
+            slot: 40
+            lore:
+              - "&7Solid brown concrete"
+          green_concrete:
+            material: GREEN_CONCRETE
+            name: "&2Green Concrete"
+            price: 8
+            slot: 41
+            lore:
+              - "&7Solid green concrete"
+          red_concrete:
+            material: RED_CONCRETE
+            name: "&cRed Concrete"
+            price: 8
+            slot: 42
+            lore:
+              - "&7Solid red concrete"
+          black_concrete:
+            material: BLACK_CONCRETE
+            name: "&0Black Concrete"
+            price: 8
+            slot: 43
+            lore:
+              - "&7Solid black concrete"
+          white_terracotta:
+            material: WHITE_TERRACOTTA
+            name: "&fWhite Terracotta"
+            price: 9
+            slot: 99
+            lore:
+              - "&7Baked colored clay"
+          orange_terracotta:
+            material: ORANGE_TERRACOTTA
+            name: "&6Orange Terracotta"
+            price: 9
+            slot: 99
+            lore:
+              - "&7Baked colored clay"
+          magenta_terracotta:
+            material: MAGENTA_TERRACOTTA
+            name: "&dMagenta Terracotta"
+            price: 9
+            slot: 99
+            lore:
+              - "&7Baked colored clay"
+          light_blue_terracotta:
+            material: LIGHT_BLUE_TERRACOTTA
+            name: "&9Light Blue Terracotta"
+            price: 9
+            slot: 99
+            lore:
+              - "&7Baked colored clay"
+          yellow_terracotta:
+            material: YELLOW_TERRACOTTA
+            name: "&eYellow Terracotta"
+            price: 9
+            slot: 99
+            lore:
+              - "&7Baked colored clay"
+          lime_terracotta:
+            material: LIME_TERRACOTTA
+            name: "&aLime Terracotta"
+            price: 9
+            slot: 99
+            lore:
+              - "&7Baked colored clay"
+          pink_terracotta:
+            material: PINK_TERRACOTTA
+            name: "&dPink Terracotta"
+            price: 9
+            slot: 99
+            lore:
+              - "&7Baked colored clay"
+          gray_terracotta:
+            material: GRAY_TERRACOTTA
+            name: "&7Gray Terracotta"
+            price: 9
+            slot: 99
+            lore:
+              - "&7Baked colored clay"
+          light_gray_terracotta:
+            material: LIGHT_GRAY_TERRACOTTA
+            name: "&7Light Gray Terracotta"
+            price: 9
+            slot: 99
+            lore:
+              - "&7Baked colored clay"
+          cyan_terracotta:
+            material: CYAN_TERRACOTTA
+            name: "&bCyan Terracotta"
+            price: 9
+            slot: 99
+            lore:
+              - "&7Baked colored clay"
+          purple_terracotta:
+            material: PURPLE_TERRACOTTA
+            name: "&5Purple Terracotta"
+            price: 9
+            slot: 99
+            lore:
+              - "&7Baked colored clay"
+          blue_terracotta:
+            material: BLUE_TERRACOTTA
+            name: "&9Blue Terracotta"
+            price: 9
+            slot: 99
+            lore:
+              - "&7Baked colored clay"
+          brown_terracotta:
+            material: BROWN_TERRACOTTA
+            name: "&6Brown Terracotta"
+            price: 9
+            slot: 99
+            lore:
+              - "&7Baked colored clay"
+          green_terracotta:
+            material: GREEN_TERRACOTTA
+            name: "&2Green Terracotta"
+            price: 9
+            slot: 99
+            lore:
+              - "&7Baked colored clay"
+          red_terracotta:
+            material: RED_TERRACOTTA
+            name: "&cRed Terracotta"
+            price: 9
+            slot: 99
+            lore:
+              - "&7Baked colored clay"
+          black_terracotta:
+            material: BLACK_TERRACOTTA
+            name: "&0Black Terracotta"
+            price: 9
+            slot: 99
+            lore:
+              - "&7Baked colored clay"
+          white_stained_glass:
+            material: WHITE_STAINED_GLASS
+            name: "&fWhite Stained Glass"
+            price: 9
+            slot: 99
+            lore:
+              - "&7Colored glass block"
+          orange_stained_glass:
+            material: ORANGE_STAINED_GLASS
+            name: "&6Orange Stained Glass"
+            price: 9
+            slot: 99
+            lore:
+              - "&7Colored glass block"
+          magenta_stained_glass:
+            material: MAGENTA_STAINED_GLASS
+            name: "&dMagenta Stained Glass"
+            price: 9
+            slot: 99
+            lore:
+              - "&7Colored glass block"
+          light_blue_stained_glass:
+            material: LIGHT_BLUE_STAINED_GLASS
+            name: "&9Light Blue Stained Glass"
+            price: 9
+            slot: 99
+            lore:
+              - "&7Colored glass block"
+          yellow_stained_glass:
+            material: YELLOW_STAINED_GLASS
+            name: "&eYellow Stained Glass"
+            price: 9
+            slot: 99
+            lore:
+              - "&7Colored glass block"
+          lime_stained_glass:
+            material: LIME_STAINED_GLASS
+            name: "&aLime Stained Glass"
+            price: 9
+            slot: 99
+            lore:
+              - "&7Colored glass block"
+          pink_stained_glass:
+            material: PINK_STAINED_GLASS
+            name: "&dPink Stained Glass"
+            price: 9
+            slot: 99
+            lore:
+              - "&7Colored glass block"
+          gray_stained_glass:
+            material: GRAY_STAINED_GLASS
+            name: "&7Gray Stained Glass"
+            price: 9
+            slot: 99
+            lore:
+              - "&7Colored glass block"
+          light_gray_stained_glass:
+            material: LIGHT_GRAY_STAINED_GLASS
+            name: "&7Light Gray Stained Glass"
+            price: 9
+            slot: 99
+            lore:
+              - "&7Colored glass block"
+          cyan_stained_glass:
+            material: CYAN_STAINED_GLASS
+            name: "&bCyan Stained Glass"
+            price: 9
+            slot: 99
+            lore:
+              - "&7Colored glass block"
+          purple_stained_glass:
+            material: PURPLE_STAINED_GLASS
+            name: "&5Purple Stained Glass"
+            price: 9
+            slot: 99
+            lore:
+              - "&7Colored glass block"
+          blue_stained_glass:
+            material: BLUE_STAINED_GLASS
+            name: "&9Blue Stained Glass"
+            price: 9
+            slot: 99
+            lore:
+              - "&7Colored glass block"
+          brown_stained_glass:
+            material: BROWN_STAINED_GLASS
+            name: "&6Brown Stained Glass"
+            price: 9
+            slot: 99
+            lore:
+              - "&7Colored glass block"
+          green_stained_glass:
+            material: GREEN_STAINED_GLASS
+            name: "&2Green Stained Glass"
+            price: 9
+            slot: 99
+            lore:
+              - "&7Colored glass block"
+          red_stained_glass:
+            material: RED_STAINED_GLASS
+            name: "&cRed Stained Glass"
+            price: 9
+            slot: 99
+            lore:
+              - "&7Colored glass block"
+          black_stained_glass:
+            material: BLACK_STAINED_GLASS
+            name: "&0Black Stained Glass"
+            price: 9
+            slot: 99
+            lore:
+              - "&7Colored glass block"
+          white_glazed_terracotta:
+            material: WHITE_GLAZED_TERRACOTTA
+            name: "&fWhite Glazed Terracotta"
+            price: 12
+            slot: 99
+            lore:
+              - "&7Glossy patterned terracotta"
+          orange_glazed_terracotta:
+            material: ORANGE_GLAZED_TERRACOTTA
+            name: "&6Orange Glazed Terracotta"
+            price: 12
+            slot: 99
+            lore:
+              - "&7Glossy patterned terracotta"
+          magenta_glazed_terracotta:
+            material: MAGENTA_GLAZED_TERRACOTTA
+            name: "&dMagenta Glazed Terracotta"
+            price: 12
+            slot: 99
+            lore:
+              - "&7Glossy patterned terracotta"
+          light_blue_glazed_terracotta:
+            material: LIGHT_BLUE_GLAZED_TERRACOTTA
+            name: "&9Light Blue Glazed Terracotta"
+            price: 12
+            slot: 99
+            lore:
+              - "&7Glossy patterned terracotta"
+          yellow_glazed_terracotta:
+            material: YELLOW_GLAZED_TERRACOTTA
+            name: "&eYellow Glazed Terracotta"
+            price: 12
+            slot: 99
+            lore:
+              - "&7Glossy patterned terracotta"
+          lime_glazed_terracotta:
+            material: LIME_GLAZED_TERRACOTTA
+            name: "&aLime Glazed Terracotta"
+            price: 12
+            slot: 99
+            lore:
+              - "&7Glossy patterned terracotta"
+          pink_glazed_terracotta:
+            material: PINK_GLAZED_TERRACOTTA
+            name: "&dPink Glazed Terracotta"
+            price: 12
+            slot: 99
+            lore:
+              - "&7Glossy patterned terracotta"
+          gray_glazed_terracotta:
+            material: GRAY_GLAZED_TERRACOTTA
+            name: "&7Gray Glazed Terracotta"
+            price: 12
+            slot: 99
+            lore:
+              - "&7Glossy patterned terracotta"
+          light_gray_glazed_terracotta:
+            material: LIGHT_GRAY_GLAZED_TERRACOTTA
+            name: "&7Light Gray Glazed Terracotta"
+            price: 12
+            slot: 99
+            lore:
+              - "&7Glossy patterned terracotta"
+          cyan_glazed_terracotta:
+            material: CYAN_GLAZED_TERRACOTTA
+            name: "&bCyan Glazed Terracotta"
+            price: 12
+            slot: 99
+            lore:
+              - "&7Glossy patterned terracotta"
+          purple_glazed_terracotta:
+            material: PURPLE_GLAZED_TERRACOTTA
+            name: "&5Purple Glazed Terracotta"
+            price: 12
+            slot: 99
+            lore:
+              - "&7Glossy patterned terracotta"
+          blue_glazed_terracotta:
+            material: BLUE_GLAZED_TERRACOTTA
+            name: "&9Blue Glazed Terracotta"
+            price: 12
+            slot: 99
+            lore:
+              - "&7Glossy patterned terracotta"
+          brown_glazed_terracotta:
+            material: BROWN_GLAZED_TERRACOTTA
+            name: "&6Brown Glazed Terracotta"
+            price: 12
+            slot: 99
+            lore:
+              - "&7Glossy patterned terracotta"
+          green_glazed_terracotta:
+            material: GREEN_GLAZED_TERRACOTTA
+            name: "&2Green Glazed Terracotta"
+            price: 12
+            slot: 99
+            lore:
+              - "&7Glossy patterned terracotta"
+          red_glazed_terracotta:
+            material: RED_GLAZED_TERRACOTTA
+            name: "&cRed Glazed Terracotta"
+            price: 12
+            slot: 99
+            lore:
+              - "&7Glossy patterned terracotta"
+          black_glazed_terracotta:
+            material: BLACK_GLAZED_TERRACOTTA
+            name: "&0Black Glazed Terracotta"
+            price: 12
+            slot: 99
+            lore:
+              - "&7Glossy patterned terracotta"
+      wood:
+        title: "&6Wood"
+        items:
+          oak_planks:
+            material: OAK_PLANKS
+            name: "&6Oak Planks"
+            price: 12
+            slot: 10
+            lore:
+              - "&7Classic oak planks"
+          spruce_planks:
+            material: SPRUCE_PLANKS
+            name: "&2Spruce Planks"
+            price: 12
+            slot: 11
+            lore:
+              - "&7Cold spruce planks"
+          birch_planks:
+            material: BIRCH_PLANKS
+            name: "&fBirch Planks"
+            price: 12
+            slot: 12
+            lore:
+              - "&7Light birch planks"
+          jungle_planks:
+            material: JUNGLE_PLANKS
+            name: "&6Jungle Planks"
+            price: 12
+            slot: 13
+            lore:
+              - "&7Dense jungle wood"
+          acacia_planks:
+            material: ACACIA_PLANKS
+            name: "&cAcacia Planks"
+            price: 12
+            slot: 14
+            lore:
+              - "&7Warm acacia wood"
+          dark_oak_planks:
+            material: DARK_OAK_PLANKS
+            name: "&8Dark Oak Planks"
+            price: 12
+            slot: 15
+            lore:
+              - "&7Rich dark oak wood"
+          mangrove_planks:
+            material: MANGROVE_PLANKS
+            name: "&5Mangrove Planks"
+            price: 12
+            slot: 16
+            lore:
+              - "&7Swampy mangrove wood"
+          cherry_planks:
+            material: CHERRY_PLANKS
+            name: "&dCherry Planks"
+            price: 12
+            slot: 17
+            lore:
+              - "&7Soft cherry wood"
+          warped_planks:
+            material: WARPED_PLANKS
+            name: "&3Warped Planks"
+            price: 12
+            slot: 18
+            lore:
+              - "&7Alien warped wood"
+          crimson_planks:
+            material: CRIMSON_PLANKS
+            name: "&4Crimson Planks"
+            price: 12
+            slot: 19
+            lore:
+              - "&7Crimson wood"
+          oak_log:
+            material: OAK_LOG
+            name: "&6Oak Log"
+            price: 12
+            slot: 99
+            lore:
+              - "&7Full oak log"
+          spruce_log:
+            material: SPRUCE_LOG
+            name: "&2Spruce Log"
+            price: 12
+            slot: 99
+            lore:
+              - "&7Full spruce log"
+          birch_log:
+            material: BIRCH_LOG
+            name: "&fBirch Log"
+            price: 12
+            slot: 99
+            lore:
+              - "&7Full birch log"
+          jungle_log:
+            material: JUNGLE_LOG
+            name: "&6Jungle Log"
+            price: 12
+            slot: 99
+            lore:
+              - "&7Full jungle log"
+          acacia_log:
+            material: ACACIA_LOG
+            name: "&cAcacia Log"
+            price: 12
+            slot: 99
+            lore:
+              - "&7Full acacia log"
+          dark_oak_log:
+            material: DARK_OAK_LOG
+            name: "&8Dark Oak Log"
+            price: 12
+            slot: 99
+            lore:
+              - "&7Full dark oak log"
+          mangrove_log:
+            material: MANGROVE_LOG
+            name: "&5Mangrove Log"
+            price: 12
+            slot: 99
+            lore:
+              - "&7Full mangrove log"
+          cherry_log:
+            material: CHERRY_LOG
+            name: "&dCherry Log"
+            price: 12
+            slot: 99
+            lore:
+              - "&7Full cherry log"
+          warped_stem:
+            material: WARPED_STEM
+            name: "&3Warped Stem"
+            price: 14
+            slot: 99
+            lore:
+              - "&7Alien nether stem"
+          crimson_stem:
+            material: CRIMSON_STEM
+            name: "&4Crimson Stem"
+            price: 14
+            slot: 99
+            lore:
+              - "&7Crimson nether stem"
+          stripped_oak_log:
+            material: STRIPPED_OAK_LOG
+            name: "&6Stripped Oak Log"
+            price: 14
+            slot: 99
+            lore:
+              - "&7Bark-free oak log"
+          stripped_spruce_log:
+            material: STRIPPED_SPRUCE_LOG
+            name: "&2Stripped Spruce Log"
+            price: 14
+            slot: 99
+            lore:
+              - "&7Bark-free spruce log"
+          stripped_birch_log:
+            material: STRIPPED_BIRCH_LOG
+            name: "&fStripped Birch Log"
+            price: 14
+            slot: 99
+            lore:
+              - "&7Bark-free birch log"
+          stripped_jungle_log:
+            material: STRIPPED_JUNGLE_LOG
+            name: "&6Stripped Jungle Log"
+            price: 14
+            slot: 99
+            lore:
+              - "&7Bark-free jungle log"
+          stripped_acacia_log:
+            material: STRIPPED_ACACIA_LOG
+            name: "&cStripped Acacia Log"
+            price: 14
+            slot: 99
+            lore:
+              - "&7Bark-free acacia log"
+          stripped_dark_oak_log:
+            material: STRIPPED_DARK_OAK_LOG
+            name: "&8Stripped Dark Oak Log"
+            price: 14
+            slot: 99
+            lore:
+              - "&7Bark-free dark oak log"
+          stripped_mangrove_log:
+            material: STRIPPED_MANGROVE_LOG
+            name: "&5Stripped Mangrove Log"
+            price: 14
+            slot: 99
+            lore:
+              - "&7Bark-free mangrove log"
+          stripped_cherry_log:
+            material: STRIPPED_CHERRY_LOG
+            name: "&dStripped Cherry Log"
+            price: 14
+            slot: 99
+            lore:
+              - "&7Bark-free cherry log"
+          stripped_warped_stem:
+            material: STRIPPED_WARPED_STEM
+            name: "&3Stripped Warped Stem"
+            price: 16
+            slot: 99
+            lore:
+              - "&7Bark-free warped stem"
+          stripped_crimson_stem:
+            material: STRIPPED_CRIMSON_STEM
+            name: "&4Stripped Crimson Stem"
+            price: 16
+            slot: 99
+            lore:
+              - "&7Bark-free crimson stem"
+          bamboo_block:
+            material: BAMBOO_BLOCK
+            name: "&aBamboo Block"
+            price: 12
+            slot: 99
+            lore:
+              - "&7Bundled bamboo block"
+          stripped_bamboo_block:
+            material: STRIPPED_BAMBOO_BLOCK
+            name: "&aStripped Bamboo Block"
+            price: 14
+            slot: 99
+            lore:
+              - "&7Bark-free bamboo block"
+          oak_wood:
+            material: OAK_WOOD
+            name: "&6Oak Wood"
+            price: 12
+            slot: 99
+            lore:
+              - "&7All-bark oak block"
+          spruce_wood:
+            material: SPRUCE_WOOD
+            name: "&2Spruce Wood"
+            price: 12
+            slot: 99
+            lore:
+              - "&7All-bark spruce block"
+          birch_wood:
+            material: BIRCH_WOOD
+            name: "&fBirch Wood"
+            price: 12
+            slot: 99
+            lore:
+              - "&7All-bark birch block"
+          jungle_wood:
+            material: JUNGLE_WOOD
+            name: "&6Jungle Wood"
+            price: 12
+            slot: 99
+            lore:
+              - "&7All-bark jungle block"
+          acacia_wood:
+            material: ACACIA_WOOD
+            name: "&cAcacia Wood"
+            price: 12
+            slot: 99
+            lore:
+              - "&7All-bark acacia block"
+          dark_oak_wood:
+            material: DARK_OAK_WOOD
+            name: "&8Dark Oak Wood"
+            price: 12
+            slot: 99
+            lore:
+              - "&7All-bark dark oak block"
+          mangrove_wood:
+            material: MANGROVE_WOOD
+            name: "&5Mangrove Wood"
+            price: 12
+            slot: 99
+            lore:
+              - "&7All-bark mangrove block"
+          cherry_wood:
+            material: CHERRY_WOOD
+            name: "&dCherry Wood"
+            price: 12
+            slot: 99
+            lore:
+              - "&7All-bark cherry block"
+          crimson_hyphae:
+            material: CRIMSON_HYPHAE
+            name: "&4Crimson Hyphae"
+            price: 14
+            slot: 99
+            lore:
+              - "&7All-bark crimson stem"
+          warped_hyphae:
+            material: WARPED_HYPHAE
+            name: "&3Warped Hyphae"
+            price: 14
+            slot: 99
+            lore:
+              - "&7All-bark warped stem"
+          stripped_oak_wood:
+            material: STRIPPED_OAK_WOOD
+            name: "&6Stripped Oak Wood"
+            price: 14
+            slot: 99
+            lore:
+              - "&7Bark-free all-oak block"
+          stripped_spruce_wood:
+            material: STRIPPED_SPRUCE_WOOD
+            name: "&2Stripped Spruce Wood"
+            price: 14
+            slot: 99
+            lore:
+              - "&7Bark-free all-spruce block"
+          stripped_birch_wood:
+            material: STRIPPED_BIRCH_WOOD
+            name: "&fStripped Birch Wood"
+            price: 14
+            slot: 99
+            lore:
+              - "&7Bark-free all-birch block"
+          stripped_jungle_wood:
+            material: STRIPPED_JUNGLE_WOOD
+            name: "&6Stripped Jungle Wood"
+            price: 14
+            slot: 99
+            lore:
+              - "&7Bark-free all-jungle block"
+          stripped_acacia_wood:
+            material: STRIPPED_ACACIA_WOOD
+            name: "&cStripped Acacia Wood"
+            price: 14
+            slot: 99
+            lore:
+              - "&7Bark-free all-acacia block"
+          stripped_dark_oak_wood:
+            material: STRIPPED_DARK_OAK_WOOD
+            name: "&8Stripped Dark Oak Wood"
+            price: 14
+            slot: 99
+            lore:
+              - "&7Bark-free all-dark oak block"
+          stripped_mangrove_wood:
+            material: STRIPPED_MANGROVE_WOOD
+            name: "&5Stripped Mangrove Wood"
+            price: 14
+            slot: 99
+            lore:
+              - "&7Bark-free all-mangrove block"
+          stripped_cherry_wood:
+            material: STRIPPED_CHERRY_WOOD
+            name: "&dStripped Cherry Wood"
+            price: 14
+            slot: 99
+            lore:
+              - "&7Bark-free all-cherry block"
+          stripped_crimson_hyphae:
+            material: STRIPPED_CRIMSON_HYPHAE
+            name: "&4Stripped Crimson Hyphae"
+            price: 16
+            slot: 99
+            lore:
+              - "&7Bark-free crimson stem"
+          stripped_warped_hyphae:
+            material: STRIPPED_WARPED_HYPHAE
+            name: "&3Stripped Warped Hyphae"
+            price: 16
+            slot: 99
+            lore:
+              - "&7Bark-free warped stem"
+          pale_oak_planks:
+            material: PALE_OAK_PLANKS
+            name: "&fPale Oak Planks"
+            price: 12
+            slot: 99
+            lore:
+              - "&7Pale, ghostly planks"
+          pale_oak_log:
+            material: PALE_OAK_LOG
+            name: "&fPale Oak Log"
+            price: 12
+            slot: 99
+            lore:
+              - "&7Full pale oak log"
+          pale_oak_wood:
+            material: PALE_OAK_WOOD
+            name: "&fPale Oak Wood"
+            price: 12
+            slot: 99
+            lore:
+              - "&7All-bark pale oak block"
+          stripped_pale_oak_log:
+            material: STRIPPED_PALE_OAK_LOG
+            name: "&fStripped Pale Oak Log"
+            price: 14
+            slot: 99
+            lore:
+              - "&7Bark-free pale oak log"
+          stripped_pale_oak_wood:
+            material: STRIPPED_PALE_OAK_WOOD
+            name: "&fStripped Pale Oak Wood"
+            price: 14
+            slot: 99
+            lore:
+              - "&7Bark-free all-pale oak block"
+      stone:
+        title: "&7Stone Blocks"
+        items:
+          stone:
+            material: STONE
+            name: "&7Stone"
+            price: 10
+            slot: 10
+            lore:
+              - "&7Basic stone block"
+          cobblestone:
+            material: COBBLESTONE
+            name: "&8Cobblestone"
+            price: 10
+            slot: 11
+            lore:
+              - "&7Rough stone block"
+          stone_bricks:
+            material: STONE_BRICKS
+            name: "&fStone Bricks"
+            price: 15
+            slot: 12
+            lore:
+              - "&7Classic masonry block"
+          deepslate:
+            material: DEEPSLATE
+            name: "&8Deepslate"
+            price: 12
+            slot: 13
+            lore:
+              - "&7Dark stone layer"
+          polished_deepslate:
+            material: POLISHED_DEEPSLATE
+            name: "&8Polished Deepslate"
+            price: 14
+            slot: 14
+            lore:
+              - "&7Refined deepslate"
+          obsidian:
+            material: OBSIDIAN
+            name: "&5Obsidian"
+            price: 30
+            slot: 15
+            lore:
+              - "&7Hard volcanic glass"
+          quartz_block:
+            material: QUARTZ_BLOCK
+            name: "&fQuartz Block"
+            price: 20
+            slot: 16
+            lore:
+              - "&7Smooth quartz"
+          andesite:
+            material: ANDESITE
+            name: "&7Andesite"
+            price: 12
+            slot: 17
+            lore:
+              - "&7Volcanic rock"
+          granite:
+            material: GRANITE
+            name: "&7Granite"
+            price: 12
+            slot: 18
+            lore:
+              - "&7Speckled stone"
+          diorite:
+            material: DIORITE
+            name: "&7Diorite"
+            price: 12
+            slot: 19
+            lore:
+              - "&7Light stone"
+          polished_andesite:
+            material: POLISHED_ANDESITE
+            name: "&7Polished Andesite"
+            price: 14
+            slot: 99
+            lore:
+              - "&7Smooth andesite"
+          polished_granite:
+            material: POLISHED_GRANITE
+            name: "&7Polished Granite"
+            price: 14
+            slot: 99
+            lore:
+              - "&7Smooth granite"
+          polished_diorite:
+            material: POLISHED_DIORITE
+            name: "&7Polished Diorite"
+            price: 14
+            slot: 99
+            lore:
+              - "&7Smooth diorite"
+          smooth_stone:
+            material: SMOOTH_STONE
+            name: "&7Smooth Stone"
+            price: 12
+            slot: 99
+            lore:
+              - "&7Refined stone block"
+          bricks:
+            material: BRICKS
+            name: "&cBricks"
+            price: 14
+            slot: 99
+            lore:
+              - "&7Classic clay bricks"
+          mud_bricks:
+            material: MUD_BRICKS
+            name: "&6Mud Bricks"
+            price: 16
+            slot: 99
+            lore:
+              - "&7Sun-baked mud bricks"
+          packed_mud:
+            material: PACKED_MUD
+            name: "&6Packed Mud"
+            price: 12
+            slot: 99
+            lore:
+              - "&7Dense dried mud"
+          nether_bricks:
+            material: NETHER_BRICKS
+            name: "&4Nether Bricks"
+            price: 16
+            slot: 99
+            lore:
+              - "&7Dark nether masonry"
+          red_nether_bricks:
+            material: RED_NETHER_BRICKS
+            name: "&4Red Nether Bricks"
+            price: 18
+            slot: 99
+            lore:
+              - "&7Deep red nether masonry"
+          basalt:
+            material: BASALT
+            name: "&8Basalt"
+            price: 14
+            slot: 99
+            lore:
+              - "&7Volcanic column block"
+          smooth_basalt:
+            material: SMOOTH_BASALT
+            name: "&8Smooth Basalt"
+            price: 16
+            slot: 99
+            lore:
+              - "&7Refined basalt"
+          blackstone:
+            material: BLACKSTONE
+            name: "&8Blackstone"
+            price: 14
+            slot: 99
+            lore:
+              - "&7Dark volcanic stone"
+          polished_blackstone:
+            material: POLISHED_BLACKSTONE
+            name: "&8Polished Blackstone"
+            price: 18
+            slot: 99
+            lore:
+              - "&7Smooth blackstone"
+          polished_blackstone_bricks:
+            material: POLISHED_BLACKSTONE_BRICKS
+            name: "&8Polished Blackstone Bricks"
+            price: 20
+            slot: 99
+            lore:
+              - "&7Blackstone masonry"
+          chiseled_polished_blackstone:
+            material: CHISELED_POLISHED_BLACKSTONE
+            name: "&8Chiseled Polished Blackstone"
+            price: 22
+            slot: 99
+            lore:
+              - "&7Decorative blackstone"
+          gilded_blackstone:
+            material: GILDED_BLACKSTONE
+            name: "&6Gilded Blackstone"
+            price: 30
+            slot: 99
+            lore:
+              - "&7Gold-veined blackstone"
+          end_stone:
+            material: END_STONE
+            name: "&eEnd Stone"
+            price: 18
+            slot: 99
+            lore:
+              - "&7Pale end dimension stone"
+          end_stone_bricks:
+            material: END_STONE_BRICKS
+            name: "&eEnd Stone Bricks"
+            price: 20
+            slot: 99
+            lore:
+              - "&7End stone masonry"
+          purpur_block:
+            material: PURPUR_BLOCK
+            name: "&5Purpur Block"
+            price: 22
+            slot: 99
+            lore:
+              - "&7End city building block"
+          tuff:
+            material: TUFF
+            name: "&7Tuff"
+            price: 12
+            slot: 99
+            lore:
+              - "&7Grey volcanic rock"
+          calcite:
+            material: CALCITE
+            name: "&fCalcite"
+            price: 14
+            slot: 99
+            lore:
+              - "&7Pale carbonate stone"
+          dripstone_block:
+            material: DRIPSTONE_BLOCK
+            name: "&6Dripstone Block"
+            price: 14
+            slot: 99
+            lore:
+              - "&7Rugged cave stone"
+          cobbled_deepslate:
+            material: COBBLED_DEEPSLATE
+            name: "&8Cobbled Deepslate"
+            price: 10
+            slot: 99
+            lore:
+              - "&7Rough deepslate block"
+          deepslate_bricks:
+            material: DEEPSLATE_BRICKS
+            name: "&8Deepslate Bricks"
+            price: 18
+            slot: 99
+            lore:
+              - "&7Deepslate masonry"
+          deepslate_tiles:
+            material: DEEPSLATE_TILES
+            name: "&8Deepslate Tiles"
+            price: 20
+            slot: 99
+            lore:
+              - "&7Polished deepslate tiles"
+          chiseled_deepslate:
+            material: CHISELED_DEEPSLATE
+            name: "&8Chiseled Deepslate"
+            price: 22
+            slot: 99
+            lore:
+              - "&7Decorative deepslate"
+          reinforced_deepslate:
+            material: REINFORCED_DEEPSLATE
+            name: "&8Reinforced Deepslate"
+            price: 40
+            slot: 99
+            lore:
+              - "&7Ancient city block"
+          prismarine_bricks:
+            material: PRISMARINE_BRICKS
+            name: "&bPrismarine Bricks"
+            price: 28
+            slot: 99
+            lore:
+              - "&7Ocean monument masonry"
+          dark_prismarine:
+            material: DARK_PRISMARINE
+            name: "&bDark Prismarine"
+            price: 30
+            slot: 99
+            lore:
+              - "&7Deep sea stone"
+          mossy_cobblestone:
+            material: MOSSY_COBBLESTONE
+            name: "&2Mossy Cobblestone"
+            price: 12
+            slot: 99
+            lore:
+              - "&7Overgrown cobblestone"
+          mossy_stone_bricks:
+            material: MOSSY_STONE_BRICKS
+            name: "&2Mossy Stone Bricks"
+            price: 16
+            slot: 99
+            lore:
+              - "&7Overgrown masonry"
+          cracked_stone_bricks:
+            material: CRACKED_STONE_BRICKS
+            name: "&7Cracked Stone Bricks"
+            price: 16
+            slot: 99
+            lore:
+              - "&7Weathered stone bricks"
+          chiseled_stone_bricks:
+            material: CHISELED_STONE_BRICKS
+            name: "&7Chiseled Stone Bricks"
+            price: 18
+            slot: 99
+            lore:
+              - "&7Decorative stone bricks"
+          chiseled_quartz_block:
+            material: CHISELED_QUARTZ_BLOCK
+            name: "&fChiseled Quartz Block"
+            price: 22
+            slot: 99
+            lore:
+              - "&7Decorative quartz"
+          quartz_bricks:
+            material: QUARTZ_BRICKS
+            name: "&fQuartz Bricks"
+            price: 22
+            slot: 99
+            lore:
+              - "&7Quartz masonry"
+          smooth_quartz:
+            material: SMOOTH_QUARTZ
+            name: "&fSmooth Quartz"
+            price: 20
+            slot: 99
+            lore:
+              - "&7Polished quartz block"
+          quartz_pillar:
+            material: QUARTZ_PILLAR
+            name: "&fQuartz Pillar"
+            price: 20
+            slot: 99
+            lore:
+              - "&7Fluted quartz column"
+          netherrack:
+            material: NETHERRACK
+            name: "&4Netherrack"
+            price: 8
+            slot: 99
+            lore:
+              - "&7Porous nether stone"
+          soul_soil:
+            material: SOUL_SOIL
+            name: "&8Soul Soil"
+            price: 14
+            slot: 99
+            lore:
+              - "&7Haunted nether soil"
+          cracked_nether_bricks:
+            material: CRACKED_NETHER_BRICKS
+            name: "&4Cracked Nether Bricks"
+            price: 18
+            slot: 99
+            lore:
+              - "&7Weathered nether masonry"
+          chiseled_nether_bricks:
+            material: CHISELED_NETHER_BRICKS
+            name: "&4Chiseled Nether Bricks"
+            price: 20
+            slot: 99
+            lore:
+              - "&7Decorative nether masonry"
+          cracked_polished_blackstone_bricks:
+            material: CRACKED_POLISHED_BLACKSTONE_BRICKS
+            name: "&8Cracked Polished Blackstone Bricks"
+            price: 22
+            slot: 99
+            lore:
+              - "&7Weathered blackstone masonry"
+          cracked_deepslate_bricks:
+            material: CRACKED_DEEPSLATE_BRICKS
+            name: "&8Cracked Deepslate Bricks"
+            price: 20
+            slot: 99
+            lore:
+              - "&7Weathered deepslate masonry"
+          cracked_deepslate_tiles:
+            material: CRACKED_DEEPSLATE_TILES
+            name: "&8Cracked Deepslate Tiles"
+            price: 22
+            slot: 99
+            lore:
+              - "&7Weathered deepslate tiles"
+          sculk:
+            material: SCULK
+            name: "&3Sculk"
+            price: 24
+            slot: 99
+            lore:
+              - "&7Eerie deep dark growth"
+          resin_block:
+            material: RESIN_BLOCK
+            name: "&6Resin Block"
+            price: 18
+            slot: 99
+            lore:
+              - "&7Compressed amber resin"
+          resin_bricks:
+            material: RESIN_BRICKS
+            name: "&6Resin Bricks"
+            price: 20
+            slot: 99
+            lore:
+              - "&7Amber resin masonry"
+          chiseled_resin_bricks:
+            material: CHISELED_RESIN_BRICKS
+            name: "&6Chiseled Resin Bricks"
+            price: 22
+            slot: 99
+            lore:
+              - "&7Decorative resin masonry"
+          tuff_bricks:
+            material: TUFF_BRICKS
+            name: "&7Tuff Bricks"
+            price: 16
+            slot: 99
+            lore:
+              - "&7Grey volcanic masonry"
+          polished_tuff:
+            material: POLISHED_TUFF
+            name: "&7Polished Tuff"
+            price: 14
+            slot: 99
+            lore:
+              - "&7Smooth volcanic rock"
+          chiseled_tuff:
+            material: CHISELED_TUFF
+            name: "&7Chiseled Tuff"
+            price: 18
+            slot: 99
+            lore:
+              - "&7Decorative volcanic rock"
+          chiseled_tuff_bricks:
+            material: CHISELED_TUFF_BRICKS
+            name: "&7Chiseled Tuff Bricks"
+            price: 18
+            slot: 99
+            lore:
+              - "&7Decorative volcanic masonry"
+          mud:
+            material: MUD
+            name: "&8Mud"
+            price: 10
+            slot: 99
+            lore:
+              - "&7Wet swamp block"
+      variety:
+        title: "&5Variety"
+        items:
+          glass:
+            material: GLASS
+            name: "&fGlass"
+            price: 20
+            slot: 10
+            lore:
+              - "&7Transparent building material"
+          sea_lantern:
+            material: SEA_LANTERN
+            name: "&bSea Lantern"
+            price: 40
+            slot: 12
+            lore:
+              - "&7Bright blue glow"
+          amethyst_block:
+            material: AMETHYST_BLOCK
+            name: "&5Amethyst Block"
+            price: 80
+            slot: 13
+            lore:
+              - "&7Crystal block"
+          prismarine:
+            material: PRISMARINE
+            name: "&bPrismarine"
+            price: 25
+            slot: 14
+            lore:
+              - "&7Oceanic build block"
+          redstone_block:
+            material: REDSTONE_BLOCK
+            name: "&cRedstone Block"
+            price: 90
+            slot: 15
+            lore:
+              - "&7Redstone power source"
+          diamond_block:
+            material: DIAMOND_BLOCK
+            name: "&bDiamond Block"
+            price: 120
+            slot: 16
+            lore:
+              - "&7Block of diamonds"
+          emerald_block:
+            material: EMERALD_BLOCK
+            name: "&aEmerald Block"
+            price: 110
+            slot: 17
+            lore:
+              - "&7Block of emeralds"
+          netherite_block:
+            material: NETHERITE_BLOCK
+            name: "&0Netherite Block"
+            price: 200
+            slot: 18
+            lore:
+              - "&7Rare netherite block"
+          bookshelf:
+            material: BOOKSHELF
+            name: "&6Bookshelf"
+            price: 25
+            slot: 99
+            lore:
+              - "&7Shelves of books"
+          bone_block:
+            material: BONE_BLOCK
+            name: "&fBone Block"
+            price: 20
+            slot: 99
+            lore:
+              - "&7Compressed bones"
+          mushroom_stem:
+            material: MUSHROOM_STEM
+            name: "&fMushroom Stem"
+            price: 18
+            slot: 99
+            lore:
+              - "&7Giant mushroom stem"
+          red_mushroom_block:
+            material: RED_MUSHROOM_BLOCK
+            name: "&cRed Mushroom Block"
+            price: 18
+            slot: 99
+            lore:
+              - "&7Giant red mushroom cap"
+          brown_mushroom_block:
+            material: BROWN_MUSHROOM_BLOCK
+            name: "&6Brown Mushroom Block"
+            price: 18
+            slot: 99
+            lore:
+              - "&7Giant brown mushroom cap"
+          honeycomb_block:
+            material: HONEYCOMB_BLOCK
+            name: "&6Honeycomb Block"
+            price: 30
+            slot: 99
+            lore:
+              - "&7Waxed honeycomb block"
+          coal_block:
+            material: COAL_BLOCK
+            name: "&0Coal Block"
+            price: 40
+            slot: 99
+            lore:
+              - "&7Compressed coal"
+          iron_block:
+            material: IRON_BLOCK
+            name: "&fIron Block"
+            price: 60
+            slot: 99
+            lore:
+              - "&7Compressed iron"
+          gold_block:
+            material: GOLD_BLOCK
+            name: "&6Gold Block"
+            price: 90
+            slot: 99
+            lore:
+              - "&7Compressed gold"
+          lapis_block:
+            material: LAPIS_BLOCK
+            name: "&9Lapis Block"
+            price: 70
+            slot: 99
+            lore:
+              - "&7Compressed lapis lazuli"
+          copper_block:
+            material: COPPER_BLOCK
+            name: "&6Copper Block"
+            price: 50
+            slot: 99
+            lore:
+              - "&7Compressed copper"
+          exposed_copper:
+            material: EXPOSED_COPPER
+            name: "&6Exposed Copper"
+            price: 50
+            slot: 99
+            lore:
+              - "&7Lightly oxidized copper"
+          weathered_copper:
+            material: WEATHERED_COPPER
+            name: "&2Weathered Copper"
+            price: 50
+            slot: 99
+            lore:
+              - "&7Weathered oxidized copper"
+          oxidized_copper:
+            material: OXIDIZED_COPPER
+            name: "&2Oxidized Copper"
+            price: 50
+            slot: 99
+            lore:
+              - "&7Fully oxidized copper"
+          waxed_copper_block:
+            material: WAXED_COPPER_BLOCK
+            name: "&6Waxed Copper Block"
+            price: 55
+            slot: 99
+            lore:
+              - "&7Sealed shiny copper"
+          waxed_exposed_copper:
+            material: WAXED_EXPOSED_COPPER
+            name: "&6Waxed Exposed Copper"
+            price: 55
+            slot: 99
+            lore:
+              - "&7Sealed exposed copper"
+          waxed_weathered_copper:
+            material: WAXED_WEATHERED_COPPER
+            name: "&2Waxed Weathered Copper"
+            price: 55
+            slot: 99
+            lore:
+              - "&7Sealed weathered copper"
+          waxed_oxidized_copper:
+            material: WAXED_OXIDIZED_COPPER
+            name: "&2Waxed Oxidized Copper"
+            price: 55
+            slot: 99
+            lore:
+              - "&7Sealed oxidized copper"
+          raw_iron_block:
+            material: RAW_IRON_BLOCK
+            name: "&6Raw Iron Block"
+            price: 65
+            slot: 99
+            lore:
+              - "&7Compressed raw iron"
+          raw_gold_block:
+            material: RAW_GOLD_BLOCK
+            name: "&6Raw Gold Block"
+            price: 95
+            slot: 99
+            lore:
+              - "&7Compressed raw gold"
+          raw_copper_block:
+            material: RAW_COPPER_BLOCK
+            name: "&6Raw Copper Block"
+            price: 50
+            slot: 99
+            lore:
+              - "&7Compressed raw copper"
+          sponge:
+            material: SPONGE
+            name: "&eSponge"
+            price: 15
+            slot: 99
+            lore:
+              - "&7Absorbent yellow block"
+          clay:
+            material: CLAY
+            name: "&fClay"
+            price: 15
+            slot: 99
+            lore:
+              - "&7Soft grey clay block"
+          nether_wart_block:
+            material: NETHER_WART_BLOCK
+            name: "&4Nether Wart Block"
+            price: 22
+            slot: 99
+            lore:
+              - "&7Bumpy red nether block"
+          warped_wart_block:
+            material: WARPED_WART_BLOCK
+            name: "&3Warped Wart Block"
+            price: 22
+            slot: 99
+            lore:
+              - "&7Bumpy teal nether block"
+          crying_obsidian:
+            material: CRYING_OBSIDIAN
+            name: "&5Crying Obsidian"
+            price: 45
+            slot: 99
+            lore:
+              - "&7Glowing purple obsidian"
+          dried_kelp_block:
+            material: DRIED_KELP_BLOCK
+            name: "&2Dried Kelp Block"
+            price: 12
+            slot: 99
+            lore:
+              - "&7Compressed dried kelp"
+          hay_block:
+            material: HAY_BLOCK
+            name: "&eHay Block"
+            price: 15
+            slot: 99
+            lore:
+              - "&7Bundled hay bale"
+          melon:
+            material: MELON
+            name: "&aMelon"
+            price: 12
+            slot: 99
+            lore:
+              - "&7Whole melon block"
+          pumpkin:
+            material: PUMPKIN
+            name: "&6Pumpkin"
+            price: 12
+            slot: 99
+            lore:
+              - "&7Whole pumpkin block"
+          glowstone:
+            material: GLOWSTONE
+            name: "&eGlowstone"
+            price: 30
+            slot: 99
+            lore:
+              - "&7Glowing nether block"
+          shroomlight:
+            material: SHROOMLIGHT
+            name: "&6Shroomlight"
+            price: 28
+            slot: 99
+            lore:
+              - "&7Glowing fungus block"
+          ancient_debris:
+            material: ANCIENT_DEBRIS
+            name: "&8Ancient Debris"
+            price: 150
+            slot: 99
+            lore:
+              - "&7Rare nether ore block"
+          bedrock:
+            material: BEDROCK
+            name: "&8Bedrock"
+            price: 60
+            slot: 99
+            lore:
+              - "&7Unbreakable world layer"
+          dirt:
+            material: DIRT
+            name: "&6Dirt"
+            price: 4
+            slot: 99
+            lore:
+              - "&7Plain dirt block"
+          grass_block:
+            material: GRASS_BLOCK
+            name: "&aGrass Block"
+            price: 6
+            slot: 99
+            lore:
+              - "&7Grassy dirt block"
+          coarse_dirt:
+            material: COARSE_DIRT
+            name: "&6Coarse Dirt"
+            price: 5
+            slot: 99
+            lore:
+              - "&7Grassless rough dirt"
+          podzol:
+            material: PODZOL
+            name: "&6Podzol"
+            price: 6
+            slot: 99
+            lore:
+              - "&7Forest floor soil"
+          mycelium:
+            material: MYCELIUM
+            name: "&5Mycelium"
+            price: 8
+            slot: 99
+            lore:
+              - "&7Fungal spore-covered dirt"
+          rooted_dirt:
+            material: ROOTED_DIRT
+            name: "&6Rooted Dirt"
+            price: 6
+            slot: 99
+            lore:
+              - "&7Root-woven dirt block"
+          muddy_mangrove_roots:
+            material: MUDDY_MANGROVE_ROOTS
+            name: "&8Muddy Mangrove Roots"
+            price: 10
+            slot: 99
+            lore:
+              - "&7Root-tangled mud block"
+          moss_block:
+            material: MOSS_BLOCK
+            name: "&2Moss Block"
+            price: 8
+            slot: 99
+            lore:
+              - "&7Soft green moss"
+          snow_block:
+            material: SNOW_BLOCK
+            name: "&fSnow Block"
+            price: 6
+            slot: 99
+            lore:
+              - "&7Packed snow block"
+          coal_ore:
+            material: COAL_ORE
+            name: "&8Coal Ore"
+            price: 14
+            slot: 99
+            lore:
+              - "&7Coal-flecked stone"
+          iron_ore:
+            material: IRON_ORE
+            name: "&fIron Ore"
+            price: 16
+            slot: 99
+            lore:
+              - "&7Iron-flecked stone"
+          gold_ore:
+            material: GOLD_ORE
+            name: "&6Gold Ore"
+            price: 20
+            slot: 99
+            lore:
+              - "&7Gold-flecked stone"
+          diamond_ore:
+            material: DIAMOND_ORE
+            name: "&bDiamond Ore"
+            price: 60
+            slot: 99
+            lore:
+              - "&7Diamond-flecked stone"
+          emerald_ore:
+            material: EMERALD_ORE
+            name: "&aEmerald Ore"
+            price: 55
+            slot: 99
+            lore:
+              - "&7Emerald-flecked stone"
+          lapis_ore:
+            material: LAPIS_ORE
+            name: "&9Lapis Ore"
+            price: 30
+            slot: 99
+            lore:
+              - "&7Lapis-flecked stone"
+          redstone_ore:
+            material: REDSTONE_ORE
+            name: "&cRedstone Ore"
+            price: 25
+            slot: 99
+            lore:
+              - "&7Redstone-flecked stone"
+          copper_ore:
+            material: COPPER_ORE
+            name: "&6Copper Ore"
+            price: 18
+            slot: 99
+            lore:
+              - "&7Copper-flecked stone"
+          nether_gold_ore:
+            material: NETHER_GOLD_ORE
+            name: "&6Nether Gold Ore"
+            price: 20
+            slot: 99
+            lore:
+              - "&7Gold-flecked netherrack"
+          nether_quartz_ore:
+            material: NETHER_QUARTZ_ORE
+            name: "&fNether Quartz Ore"
+            price: 18
+            slot: 99
+            lore:
+              - "&7Quartz-flecked netherrack"
+          deepslate_coal_ore:
+            material: DEEPSLATE_COAL_ORE
+            name: "&8Deepslate Coal Ore"
+            price: 15
+            slot: 99
+            lore:
+              - "&7Coal-flecked deepslate"
+          deepslate_iron_ore:
+            material: DEEPSLATE_IRON_ORE
+            name: "&fDeepslate Iron Ore"
+            price: 17
+            slot: 99
+            lore:
+              - "&7Iron-flecked deepslate"
+          deepslate_gold_ore:
+            material: DEEPSLATE_GOLD_ORE
+            name: "&6Deepslate Gold Ore"
+            price: 21
+            slot: 99
+            lore:
+              - "&7Gold-flecked deepslate"
+          deepslate_diamond_ore:
+            material: DEEPSLATE_DIAMOND_ORE
+            name: "&bDeepslate Diamond Ore"
+            price: 65
+            slot: 99
+            lore:
+              - "&7Diamond-flecked deepslate"
+          deepslate_emerald_ore:
+            material: DEEPSLATE_EMERALD_ORE
+            name: "&aDeepslate Emerald Ore"
+            price: 60
+            slot: 99
+            lore:
+              - "&7Emerald-flecked deepslate"
+          deepslate_lapis_ore:
+            material: DEEPSLATE_LAPIS_ORE
+            name: "&9Deepslate Lapis Ore"
+            price: 32
+            slot: 99
+            lore:
+              - "&7Lapis-flecked deepslate"
+          deepslate_redstone_ore:
+            material: DEEPSLATE_REDSTONE_ORE
+            name: "&cDeepslate Redstone Ore"
+            price: 27
+            slot: 99
+            lore:
+              - "&7Redstone-flecked deepslate"
+          deepslate_copper_ore:
+            material: DEEPSLATE_COPPER_ORE
+            name: "&6Deepslate Copper Ore"
+            price: 20
+            slot: 99
+            lore:
+              - "&7Copper-flecked deepslate"
+          cut_copper:
+            material: CUT_COPPER
+            name: "&6Cut Copper"
+            price: 52
+            slot: 99
+            lore:
+              - "&7Paneled copper block"
+          exposed_cut_copper:
+            material: EXPOSED_CUT_COPPER
+            name: "&6Exposed Cut Copper"
+            price: 52
+            slot: 99
+            lore:
+              - "&7Paneled exposed copper"
+          weathered_cut_copper:
+            material: WEATHERED_CUT_COPPER
+            name: "&2Weathered Cut Copper"
+            price: 52
+            slot: 99
+            lore:
+              - "&7Paneled weathered copper"
+          oxidized_cut_copper:
+            material: OXIDIZED_CUT_COPPER
+            name: "&2Oxidized Cut Copper"
+            price: 52
+            slot: 99
+            lore:
+              - "&7Paneled oxidized copper"
+          waxed_cut_copper:
+            material: WAXED_CUT_COPPER
+            name: "&6Waxed Cut Copper"
+            price: 56
+            slot: 99
+            lore:
+              - "&7Sealed paneled copper"
+          waxed_exposed_cut_copper:
+            material: WAXED_EXPOSED_CUT_COPPER
+            name: "&6Waxed Exposed Cut Copper"
+            price: 56
+            slot: 99
+            lore:
+              - "&7Sealed exposed panels"
+          waxed_weathered_cut_copper:
+            material: WAXED_WEATHERED_CUT_COPPER
+            name: "&2Waxed Weathered Cut Copper"
+            price: 56
+            slot: 99
+            lore:
+              - "&7Sealed weathered panels"
+          waxed_oxidized_cut_copper:
+            material: WAXED_OXIDIZED_CUT_COPPER
+            name: "&2Waxed Oxidized Cut Copper"
+            price: 56
+            slot: 99
+            lore:
+              - "&7Sealed oxidized panels"
+          copper_grate:
+            material: COPPER_GRATE
+            name: "&6Copper Grate"
+            price: 45
+            slot: 99
+            lore:
+              - "&7Perforated copper block"
+          exposed_copper_grate:
+            material: EXPOSED_COPPER_GRATE
+            name: "&6Exposed Copper Grate"
+            price: 45
+            slot: 99
+            lore:
+              - "&7Perforated exposed copper"
+          weathered_copper_grate:
+            material: WEATHERED_COPPER_GRATE
+            name: "&2Weathered Copper Grate"
+            price: 45
+            slot: 99
+            lore:
+              - "&7Perforated weathered copper"
+          oxidized_copper_grate:
+            material: OXIDIZED_COPPER_GRATE
+            name: "&2Oxidized Copper Grate"
+            price: 45
+            slot: 99
+            lore:
+              - "&7Perforated oxidized copper"
+          tinted_glass:
+            material: TINTED_GLASS
+            name: "&8Tinted Glass"
+            price: 24
+            slot: 99
+            lore:
+              - "&7Light-blocking glass"
+          wet_sponge:
+            material: WET_SPONGE
+            name: "&2Wet Sponge"
+            price: 15
+            slot: 99
+            lore:
+              - "&7Water-soaked sponge"
+          crimson_nylium:
+            material: CRIMSON_NYLIUM
+            name: "&4Crimson Nylium"
+            price: 14
+            slot: 99
+            lore:
+              - "&7Crimson nether terrain"
+          warped_nylium:
+            material: WARPED_NYLIUM
+            name: "&3Warped Nylium"
+            price: 14
+            slot: 99
+            lore:
+              - "&7Warped nether terrain"
+  tools_shop:
+    title: "&bTools"
+    size: 27
+    page-size: 21
+    category-selector:
+      tools:
+        slot: 0
+        item: IRON_PICKAXE
+        name: "&bTools"
+        lore:
+          - "&7Click to view"
+        action: category
+        category: tools
+    categories:
+      tools:
+        title: "&bTools"
+        items:
+          wooden_pickaxe:
+            material: WOODEN_PICKAXE
+            name: "&fWooden Pickaxe"
+            price: 0
+            default: true
+            slot: 10
+          stone_pickaxe:
+            material: STONE_PICKAXE
+            name: "&7Stone Pickaxe"
+            price: 0
+            slot: 11
+          iron_pickaxe:
+            material: IRON_PICKAXE
+            name: "&8Iron Pickaxe"
+            price: 0
+            slot: 12
+          golden_pickaxe:
+            material: GOLDEN_PICKAXE
+            name: "&6Golden Pickaxe"
+            price: 0
+            slot: 13
+          diamond_pickaxe:
+            material: DIAMOND_PICKAXE
+            name: "&bDiamond Pickaxe"
+            price: 0
+            slot: 14
+          netherite_pickaxe:
+            material: NETHERITE_PICKAXE
+            name: "&5Netherite Pickaxe"
+            price: 0
+            slot: 15
+          wooden_axe:
+            material: WOODEN_AXE
+            name: "&fWooden Axe"
+            price: 0
+            slot: 16
+          stone_axe:
+            material: STONE_AXE
+            name: "&7Stone Axe"
+            price: 0
+            slot: 17
+          iron_axe:
+            material: IRON_AXE
+            name: "&8Iron Axe"
+            price: 0
+            slot: 18
+          golden_axe:
+            material: GOLDEN_AXE
+            name: "&6Golden Axe"
+            price: 0
+            slot: 19
+          diamond_axe:
+            material: DIAMOND_AXE
+            name: "&bDiamond Axe"
+            price: 0
+            slot: 20
+          netherite_axe:
+            material: NETHERITE_AXE
+            name: "&5Netherite Axe"
+            price: 0
+            slot: 21
+          wooden_shovel:
+            material: WOODEN_SHOVEL
+            name: "&fWooden Shovel"
+            price: 0
+            slot: 22
+          stone_shovel:
+            material: STONE_SHOVEL
+            name: "&7Stone Shovel"
+            price: 0
+            slot: 23
+          iron_shovel:
+            material: IRON_SHOVEL
+            name: "&8Iron Shovel"
+            price: 0
+            slot: 24
+          golden_shovel:
+            material: GOLDEN_SHOVEL
+            name: "&6Golden Shovel"
+            price: 0
+            slot: 25
+          diamond_shovel:
+            material: DIAMOND_SHOVEL
+            name: "&bDiamond Shovel"
+            price: 0
+            slot: 26
+          netherite_shovel:
+            material: NETHERITE_SHOVEL
+            name: "&5Netherite Shovel"
+            price: 0
+            slot: 27
+  reset_animation:
+    title: "&6Reset Animation"
+    size: 27
+    page-size: 21
+    category-selector:
+      colors:
+        slot: 0
+        item: FIREWORK_ROCKET
+        name: "&6Reset Animation"
+        lore:
+          - "&7Choose your reset animation"
+        action: category
+        category: colors
+    categories:
+      colors:
+        title: "&6Reset Animation"
+        items:
+          none:
+            material: BARRIER
+            name: "&7None"
+            price: 0
+            default: true
+            slot: 10
+          falling:
+            material: SAND
+            name: "&fFalling"
+            price: 0
+            slot: 11
+          ice:
+            material: ICE
+            name: "&bIce"
+            price: 0
+            slot: 12
+          blue:
+            material: BLUE_DYE
+            name: "&9Blue"
+            price: 0
+            slot: 13
+          fire:
+            material: FLINT_AND_STEEL
+            name: "&cFire"
+            price: 0
+            slot: 14
+          creative_mode:
+            material: PLAYER_HEAD
+            name: "&aCreative Mode"
+            price: 0
+            slot: 15
+          magic_swirl:
+            material: AMETHYST_SHARD
+            name: "&5Magic Swirl"
+            price: 0
+            slot: 16
+  firework_color:
+    title: "&6Firework Color"
+    size: 27
+    page-size: 21
+    category-selector:
+      colors:
+        slot: 0
+        item: FIREWORK_ROCKET
+        name: "&6Firework Color"
+        lore:
+          - "&7Choose your firework color"
+        action: category
+        category: colors
+    categories:
+      colors:
+        title: "&6Firework Color"
+        items:
+          white_dye:
+            material: WHITE_DYE
+            name: "&fWhite"
+            price: 0
+            default: true
+            slot: 10
+          orange_dye:
+            material: ORANGE_DYE
+            name: "&6Orange"
+            price: 0
+            slot: 12
+          magenta_dye:
+            material: MAGENTA_DYE
+            name: "&dMagenta"
+            price: 0
+            slot: 13
+          light_blue_dye:
+            material: LIGHT_BLUE_DYE
+            name: "&9Light Blue"
+            price: 0
+            slot: 14
+          yellow_dye:
+            material: YELLOW_DYE
+            name: "&eYellow"
+            price: 0
+            slot: 15
+          lime_dye:
+            material: LIME_DYE
+            name: "&aLime"
+            price: 0
+            slot: 16
+          pink_dye:
+            material: PINK_DYE
+            name: "&dPink"
+            price: 0
+            slot: 17
+          gray_dye:
+            material: GRAY_DYE
+            name: "&7Gray"
+            price: 0
+            slot: 18
+          light_gray_dye:
+            material: LIGHT_GRAY_DYE
+            name: "&7Light Gray"
+            price: 0
+            slot: 19
+          cyan_dye:
+            material: CYAN_DYE
+            name: "&bCyan"
+            price: 0
+            slot: 20
+          purple_dye:
+            material: PURPLE_DYE
+            name: "&5Purple"
+            price: 0
+            slot: 21
+          blue_dye:
+            material: BLUE_DYE
+            name: "&9Blue"
+            price: 0
+            slot: 22
+          brown_dye:
+            material: BROWN_DYE
+            name: "&6Brown"
+            price: 0
+            slot: 23
+          green_dye:
+            material: GREEN_DYE
+            name: "&2Green"
+            price: 0
+            slot: 24
+          red_dye:
+            material: RED_DYE
+            name: "&cRed"
+            price: 0
+            slot: 25
+          black_dye:
+            material: BLACK_DYE
+            name: "&0Black"
+            price: 0
+            slot: 26
+  practice_shop:
+    title: "&bPractice Blocks"
+    size: 54
+    page-size: 21
+    category-selector:
+      practice:
+        slot: 0
+        item: WHITE_TERRACOTTA
+        name: "&bPractice Blocks"
+        lore:
+          - "&7Click to view"
+        action: category
+        category: practice
+    categories:
+      practice:
+        title: "&bPractice Blocks"
+        items:
+          white_terracotta:
+            material: WHITE_TERRACOTTA
+            name: "&fWhite Terracotta"
+            price: 0
+            default: true
+            slot: 10
+          orange_terracotta:
+            material: ORANGE_TERRACOTTA
+            name: "&6Orange Terracotta"
+            price: 0
+            slot: 11
+          magenta_terracotta:
+            material: MAGENTA_TERRACOTTA
+            name: "&dMagenta Terracotta"
+            price: 0
+            slot: 12
+          light_blue_terracotta:
+            material: LIGHT_BLUE_TERRACOTTA
+            name: "&9Light Blue Terracotta"
+            price: 0
+            slot: 13
+          yellow_terracotta:
+            material: YELLOW_TERRACOTTA
+            name: "&eYellow Terracotta"
+            price: 0
+            slot: 14
+          lime_terracotta:
+            material: LIME_TERRACOTTA
+            name: "&aLime Terracotta"
+            price: 0
+            slot: 15
+          pink_terracotta:
+            material: PINK_TERRACOTTA
+            name: "&dPink Terracotta"
+            price: 0
+            slot: 16
+          gray_terracotta:
+            material: GRAY_TERRACOTTA
+            name: "&7Gray Terracotta"
+            price: 0
+            slot: 17
+          light_gray_terracotta:
+            material: LIGHT_GRAY_TERRACOTTA
+            name: "&7Light Gray Terracotta"
+            price: 0
+            slot: 18
+          cyan_terracotta:
+            material: CYAN_TERRACOTTA
+            name: "&bCyan Terracotta"
+            price: 0
+            slot: 19
+          purple_terracotta:
+            material: PURPLE_TERRACOTTA
+            name: "&5Purple Terracotta"
+            price: 0
+            slot: 20
+          blue_terracotta:
+            material: BLUE_TERRACOTTA
+            name: "&9Blue Terracotta"
+            price: 0
+            slot: 21
+          brown_terracotta:
+            material: BROWN_TERRACOTTA
+            name: "&6Brown Terracotta"
+            price: 0
+            slot: 22
+          green_terracotta:
+            material: GREEN_TERRACOTTA
+            name: "&2Green Terracotta"
+            price: 0
+            slot: 23
+          red_terracotta:
+            material: RED_TERRACOTTA
+            name: "&cRed Terracotta"
+            price: 0
+            slot: 24
+          black_terracotta:
+            material: BLACK_TERRACOTTA
+            name: "&0Black Terracotta"
+            price: 0
+            slot: 25
+  rankups:
+    title: "&eRankups"
+    size: 27
+    page-size: 21
+    category-selector:
+      ranks:
+        slot: 0
+        item: EXPERIENCE_BOTTLE
+        name: "&eRankups"
+        lore:
+          - "&7Click to view"
+        action: category
+        category: ranks
+    categories:
+      ranks:
+        title: "&eRankups"
+        items:
+          level_1:
+            material: TURTLE_HELMET
+            name: "&aLevel 1"
+            price: 0
+            slot: 10
+            lore:
+              - "&aXP Required: &e0"
+          level_2:
+            material: LEATHER_HELMET
+            name: "&6Level 2"
+            price: 0
+            slot: 11
+            lore:
+              - "&6XP Required: &e5000"
+          level_3:
+            material: CHAINMAIL_HELMET
+            name: "&7Level 3"
+            price: 0
+            slot: 12
+            lore:
+              - "&7XP Required: &e15000"
+          level_4:
+            material: IRON_HELMET
+            name: "&8Level 4"
+            price: 0
+            slot: 13
+            lore:
+              - "&8XP Required: &e40000"
+          level_5:
+            material: GOLDEN_HELMET
+            name: "&eLevel 5"
+            price: 0
+            slot: 14
+            lore:
+              - "&eXP Required: &e100000"
+          level_6:
+            material: DIAMOND_HELMET
+            name: "&bLevel 6"
+            price: 0
+            slot: 15
+            lore:
+              - "&bXP Required: &e250000"
+          level_7:
+            material: NETHERITE_HELMET
+            name: "&5Level 7"
+            price: 0
+            slot: 16
+            lore:
+              - "&5XP Required: &e1000000"
+  island_shop:
+    title: "&aIsland Shop"
+    size: 54
+    page-size: 21
+    category-selector:
+      islands:
+        slot: 0
+        item: GRASS_BLOCK
+        name: "&aIslands"
+        lore:
+          - "&7Click to view"
+        action: category
+        category: islands
+    categories:
+      islands:
+        title: "&aIslands"
+        items:
+          default:
+            material: GRASS_BLOCK
+            name: "&aRestore to Default"
+            price: 0
+            default: true
+            slot: 10
+  tag_shop:
+    title: "&dTags"
+    size: 27
+    page-size: 21
+    category-selector:
+      tags:
+        slot: 0
+        item: NAME_TAG
+        name: "&dTags"
+        lore:
+          - "&7Click to view"
+        action: category
+        category: tags
+    categories:
+      tags:
+        title: "&dTags"
+        items:
+          none:
+            material: NAME_TAG
+            name: "&7No tag"
+            price: 0
+            default: true
+            slot: 10
