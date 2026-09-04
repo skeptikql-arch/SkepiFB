@@ -5,6 +5,7 @@ import me.skepi.skepifb.config.ConfigManager;
 import me.skepi.skepifb.arena.Arena;
 import me.skepi.skepifb.arena.ArenaIsland;
 import me.skepi.skepifb.replay.ReplayManager;
+import me.skepi.skepifb.permissions.PermissionsManager;
 import me.skepi.skepifb.replay.ReplayMetadata;
 import me.skepi.skepifb.replay.ReplayRecord;
 import me.skepi.skepifb.timer.AttemptSession;
@@ -53,6 +54,7 @@ public class HotbarManager implements Listener {
     private static final int REPLAY_PB_SLOT = 28;
     private static final int REPLAY_FAVORITE_SLOT = 19;
     private static final int REPLAY_SORT_SLOT = 37;
+    private static final int REPLAY_LAST_ATTEMPT_SLOT = 10;
     // Index 0-3, wrapping in both directions. Order here defines both the click-cycling order and
     // what each index means - keep these two arrays in lockstep with each other and with
     // applyReplaySortOrder(...) below.
@@ -455,6 +457,15 @@ public class HotbarManager implements Listener {
                 return null;
             }
         }
+        if (hotbarItem.getAction() == HotbarAction.PRACTICE_CHECKPOINT) {
+            if (playerUuid == null) {
+                return null;
+            }
+            SkepiFBPlugin mainPlugin = (SkepiFBPlugin) plugin;
+            if (!mainPlugin.getTimerManager().isPracticeMode(playerUuid)) {
+                return null;
+            }
+        }
         return createItemStack(hotbarItem, playerUuid);
     }
 
@@ -496,6 +507,18 @@ public class HotbarManager implements Listener {
 
         HotbarItem hotbarItem = findHotbarItem(item);
         if (hotbarItem == null) {
+            return;
+        }
+
+        if (hotbarItem.getAction() == HotbarAction.PRACTICE_CHECKPOINT) {
+            event.setCancelled(true);
+            org.bukkit.event.block.Action clickType = event.getAction();
+            SkepiFBPlugin mainPlugin2 = (SkepiFBPlugin) plugin;
+            if (clickType == org.bukkit.event.block.Action.LEFT_CLICK_AIR || clickType == org.bukkit.event.block.Action.LEFT_CLICK_BLOCK) {
+                mainPlugin2.getTimerManager().setPracticeCheckpoint(player);
+            } else if (clickType == org.bukkit.event.block.Action.RIGHT_CLICK_AIR || clickType == org.bukkit.event.block.Action.RIGHT_CLICK_BLOCK) {
+                mainPlugin2.getTimerManager().teleportToPracticeCheckpoint(player);
+            }
             return;
         }
 
@@ -541,6 +564,23 @@ public class HotbarManager implements Listener {
 
     private void executeHotbarAction(Player player, HotbarAction action) {
         SkepiFBPlugin mainPlugin = (SkepiFBPlugin) plugin;
+
+        // Same permission gate as the generic menu action dispatch (handleMenuAction) - a hotbar
+        // slot and a menu item with the same action now behave identically permission-wise too.
+        String actionKey = switch (action) {
+            case RESPAWN -> "respawn";
+            case ISLAND_MENU -> "island_menu";
+            case REPLAYS_MENU -> "replays_menu";
+            case SETTINGS_MENU -> "settings_menu";
+            case LEAVE -> "leave";
+            default -> null;
+        };
+        if (actionKey != null && !mainPlugin.getPermissionsManager().hasActionPermission(player, actionKey)) {
+            String msg = ChatColor.translateAlternateColorCodes('&',
+                    configManager.getConfiguration().getString("no-permission-message", "&cYou do not have permission to do that."));
+            player.sendMessage(msg);
+            return;
+        }
 
         switch (action) {
             case NONE:
@@ -701,7 +741,7 @@ public class HotbarManager implements Listener {
             } else if ("next_page".equals(action)) {
                 slotItem = createNextPageItem(itemSection, page, IslandMenuLayout.getPageCount(arena.getIslandCount()));
             } else {
-                slotItem = createConfiguredMenuItem(itemSection);
+                slotItem = createConfiguredMenuItem(itemSection, viewer);
             }
             menu.setItem(slot, slotItem);
         }
@@ -777,6 +817,25 @@ public class HotbarManager implements Listener {
     }
 
     private ItemStack createConfiguredMenuItem(ConfigurationSection itemSection) {
+        return createConfiguredMenuItem(itemSection, null);
+    }
+
+    /**
+     * Same as createConfiguredMenuItem(ConfigurationSection), but additionally recognizes the
+     * generic "action: stats" item type (see StatsMenuManager) - a display-only item showing a
+     * target player's personal best/average time/attempts/top percentile for a configured mode,
+     * usable in ANY menu. Falls back to the plain static item if no viewer is available (some
+     * call sites don't have one, e.g. non-player-specific pre-render paths), or if this item isn't
+     * a stats item at all.
+     */
+    private ItemStack createConfiguredMenuItem(ConfigurationSection itemSection, Player viewer) {
+        if (itemSection != null && viewer != null && "stats".equalsIgnoreCase(itemSection.getString("action", ""))) {
+            return ((SkepiFBPlugin) plugin).getStatsMenuManager().buildStatsItemFromSection(itemSection, viewer);
+        }
+        return createConfiguredMenuItemStatic(itemSection);
+    }
+
+    private ItemStack createConfiguredMenuItemStatic(ConfigurationSection itemSection) {
         if (itemSection == null) {
             return new ItemStack(Material.STONE);
         }
@@ -878,6 +937,15 @@ public class HotbarManager implements Listener {
             event.setCancelled(true);
             return;
         }
+
+        if (event.getView().getTopInventory() != null
+                && event.getView().getTopInventory().getHolder() instanceof me.skepi.skepifb.statsmenu.StatsMenuManager.StatsMenuHolder) {
+            // /stats menu is purely informational (dynamic lore, no click behavior anywhere in
+            // it) - just block taking items out, nothing else to dispatch.
+            event.setCancelled(true);
+            return;
+        }
+
         boolean isFastBuilderPlayer = main.getPlayerManager().isInArena(player.getUniqueId()) || main.getPlayerManager().isInTestMode(player.getUniqueId());
 
         if (event.getView().getTopInventory() == null || event.getClickedInventory() == null) {
@@ -920,29 +988,41 @@ public class HotbarManager implements Listener {
                     openReplayMetadataMenu(player, replayOwnerUuid, arenaName, page + 1);
                     return;
                 }
+                PermissionsManager.ReplayTierSettings replayTier = main.getPermissionsManager().resolveReplayTier(player);
                 // Reserved shortcut slots: just open the referenced replay, no other click behavior.
+                if (rawSlot == REPLAY_LAST_ATTEMPT_SLOT) {
+                    if (arenaName != null && replayTier.lastAttempt) {
+                        main.getReplayManager().getMostRecentReplay(replayOwnerUuid, arenaName)
+                                .ifPresent(metadata -> playReplay(player, metadata));
+                    }
+                    return;
+                }
                 if (rawSlot == REPLAY_PB_SLOT) {
-                    if (arenaName != null) {
+                    if (arenaName != null && replayTier.personalBestReplay) {
                         main.getReplayManager().getCurrentPersonalBestReplay(replayOwnerUuid, arenaName)
                                 .ifPresent(metadata -> playReplay(player, metadata));
                     }
                     return;
                 }
                 if (rawSlot == REPLAY_FAVORITE_SLOT) {
-                    if (arenaName != null) {
+                    if (arenaName != null && replayTier.favoriteReplay) {
                         main.getReplayManager().getFavoriteReplay(replayOwnerUuid, arenaName)
                                 .ifPresent(metadata -> playReplay(player, metadata));
                     }
                     return;
                 }
                 if (rawSlot == REPLAY_SORT_SLOT) {
-                    handleReplaySortClick(player, event.isRightClick(), replayOwnerUuid, arenaName, page);
+                    if (replayTier.replaySorter) {
+                        handleReplaySortClick(player, event.isRightClick(), replayOwnerUuid, arenaName, page);
+                    }
                     return;
                 }
                 int replayPosition = resolveReplaySlotIndex(rawSlot, page);
                 if (replayPosition >= 0) {
                     if (event.isRightClick() && arenaName != null) {
-                        handleReplayFavoriteToggle(player, replayOwnerUuid, arenaName, replayPosition, page);
+                        if (replayTier.favoriteReplay) {
+                            handleReplayFavoriteToggle(player, replayOwnerUuid, arenaName, replayPosition, page);
+                        }
                     } else {
                         handleReplayClick(player, replayPosition);
                     }
@@ -993,7 +1073,7 @@ public class HotbarManager implements Listener {
             }
 
             if (action != null) {
-                handleMenuAction(player, menuKey, action, lookupSlot);
+                handleMenuAction(player, menuKey, action, lookupSlot, event.isShiftClick());
                 return;
             }
 
@@ -1187,7 +1267,28 @@ public class HotbarManager implements Listener {
     }
 
     private void handleMenuAction(Player player, String menuKey, String action, int slot) {
-        if (action != null && action.startsWith("shop:")) {
+        handleMenuAction(player, menuKey, action, slot, false);
+    }
+
+    private void handleMenuAction(Player player, String menuKey, String action, int slot, boolean isShiftClick) {
+        if (action == null) {
+            return;
+        }
+        // Generic action-level permission gate (permissions.yml "actions:" section) - applies here
+        // no matter which menu the action came from, since this is the single shared dispatch
+        // point for every menu's item clicks. Parameterized actions like "shop:block_shop" or
+        // "cosmetic_none:tools_shop:tools" are checked by their base keyword (the part before the
+        // first ":"), so a single "shop" or "cosmetic_none" entry in permissions.yml covers all of
+        // them rather than needing one entry per shop/category.
+        String baseActionKey = action.contains(":") ? action.substring(0, action.indexOf(':')) : action;
+        if (!((SkepiFBPlugin) plugin).getPermissionsManager().hasActionPermission(player, baseActionKey)) {
+            String msg = ChatColor.translateAlternateColorCodes('&',
+                    configManager.getConfiguration().getString("no-permission-message", "&cYou do not have permission to do that."));
+            player.sendMessage(msg);
+            return;
+        }
+
+        if (action.startsWith("shop:")) {
             String shopId = action.substring("shop:".length()).trim();
             if (!shopId.isBlank()) {
                 ((SkepiFBPlugin) plugin).getShopManager().openShopMenu(player, shopId);
@@ -1226,6 +1327,34 @@ public class HotbarManager implements Listener {
             return;
         }
 
+        // Global "practice_template"/"spawn_template" actions: load (click) or delete
+        // (shift-click) a specific saved template (1-5), and the paired "*_save" actions to save
+        // the player's current practice blocks / position into the first free slot. All four work
+        // from ANY menu, not just practice_template_menu/spawn_template_menu - the numbered slot
+        // comes from the item's "practicetemplate"/"spawntemplate" config value, read here rather
+        // than from the clicked inventory slot itself, exactly like the existing "mode" action
+        // reads its "mode:" value.
+        if ("practice_template".equals(action)) {
+            ConfigurationSection itemSection = configManager.getMenuItemSection(menuKey, slot);
+            int templateSlot = itemSection != null ? itemSection.getInt("practicetemplate", 0) : 0;
+            handlePracticeTemplateClick(player, menuKey, templateSlot, isShiftClick);
+            return;
+        }
+        if ("spawn_template".equals(action)) {
+            ConfigurationSection itemSection = configManager.getMenuItemSection(menuKey, slot);
+            int templateSlot = itemSection != null ? itemSection.getInt("spawntemplate", 0) : 0;
+            handleSpawnTemplateClick(player, menuKey, templateSlot, isShiftClick);
+            return;
+        }
+        if ("practice_template_save".equals(action)) {
+            handlePracticeTemplateSave(player, menuKey);
+            return;
+        }
+        if ("spawn_template_save".equals(action)) {
+            handleSpawnTemplateSave(player, menuKey);
+            return;
+        }
+
         switch (action) {
             case "close_menu":
             case "close_gui":
@@ -1244,6 +1373,8 @@ public class HotbarManager implements Listener {
             case "mode_changer_menu":
             case "fastbuilder_settings_menu":
             case "cosmetics_menu":
+            case "practice_template_menu":
+            case "spawn_template_menu":
                 openBlankSubmenu(player, action);
                 break;
             case "toggle_practice_mode": {
@@ -1267,6 +1398,37 @@ public class HotbarManager implements Listener {
             }
             case "leave_confirm_no": {
                 player.closeInventory();
+                break;
+            }
+            // These five used to only be reachable from a physical hotbar item slot (via
+            // HotbarAction.RESPAWN/ISLAND_MENU/REPLAYS_MENU/SETTINGS_MENU/LEAVE in
+            // executeHotbarAction) - a menu item with one of these actions did nothing, since
+            // handleMenuAction never recognized them. Delegating to the exact same handler methods
+            // the hotbar already uses means any menu (built-in or custom) can now include a
+            // "respawn"/"island_menu"/"replays_menu"/"settings_menu"/"leave" button too, with
+            // identical behavior either way.
+            case "respawn": {
+                player.closeInventory();
+                handleRespawn(player, (SkepiFBPlugin) plugin);
+                break;
+            }
+            case "island_menu": {
+                player.closeInventory();
+                handleIslandMenu(player);
+                break;
+            }
+            case "replays_menu": {
+                player.closeInventory();
+                handleReplaysMenu(player);
+                break;
+            }
+            case "settings_menu": {
+                player.closeInventory();
+                handleSettingsMenu(player);
+                break;
+            }
+            case "leave": {
+                openLeaveConfirmationMenu(player);
                 break;
             }
             case "menu": {
@@ -1311,6 +1473,26 @@ public class HotbarManager implements Listener {
                         }
                     }
                 }
+                break;
+            }
+            case "replay": {
+                ConfigurationSection itemSection = configManager.getMenuItemSection(menuKey, slot);
+                String replayIdText = itemSection == null ? null : itemSection.getString("replayid");
+                if (replayIdText == null || replayIdText.isBlank()) {
+                    player.sendMessage(ChatColor.RED + "This replay button isn't configured with a replayid.");
+                    break;
+                }
+                UUID replayId;
+                try {
+                    replayId = UUID.fromString(replayIdText.trim());
+                } catch (IllegalArgumentException ex) {
+                    player.sendMessage(ChatColor.RED + "That replayid isn't a valid ID.");
+                    break;
+                }
+                SkepiFBPlugin mainPlugin = (SkepiFBPlugin) plugin;
+                mainPlugin.getReplayManager().findReplayById(replayId).ifPresentOrElse(
+                        metadata -> playReplay(player, metadata),
+                        () -> player.sendMessage(ChatColor.RED + "That replay no longer exists."));
                 break;
             }
             default:
@@ -1451,6 +1633,7 @@ public class HotbarManager implements Listener {
                 mainPlugin.getArenaManager().restoreIsland(arena, previousIsland);
             } catch (Throwable ignored) {}
             try { mainPlugin.getStatboardManager().removeStatboard(player.getUniqueId()); } catch (Throwable ignored) {}
+            try { mainPlugin.getIslandNpcManager().syncIsland(arena, previousIsland); } catch (Throwable ignored) {}
         }
 
         // Clear player's temporary placed blocks and reset their session
@@ -1471,6 +1654,7 @@ public class HotbarManager implements Listener {
         targetIsland.setOccupiedPlayer(player.getUniqueId());
         mainPlugin.getArenaManager().saveArenas();
         mainPlugin.getPlayerManager().trackPlayer(player.getUniqueId(), arena.getName(), targetIsland.getIndex());
+        try { mainPlugin.getIslandNpcManager().syncIsland(arena, targetIsland); } catch (Throwable ignored) {}
 
         Location teleportLocation = new Location(player.getWorld(), targetIsland.getSpawnLocation().getX(), targetIsland.getSpawnLocation().getY(), targetIsland.getSpawnLocation().getZ(), targetIsland.getSpawnLocation().getYaw(), targetIsland.getSpawnLocation().getPitch());
         boolean teleported = player.teleport(teleportLocation);
@@ -1624,14 +1808,42 @@ public class HotbarManager implements Listener {
                 menu.setItem(pageSlots.get(i), replayItem);
             }
 
-            // Reserved shortcut slots (18 = PB Replay, 19 = Favorite Replay). These are placed after
-            // the normal replay list/pagination above so they can never be overwritten by it, and
-            // they are excluded from REPLAY_MENU_SLOTS/pagination entirely so normal replay entries
-            // never render on top of them either.
-            menu.setItem(REPLAY_PB_SLOT, buildPersonalBestShortcutItem(mainPlugin, replayOwnerUuid, arenaName));
-            menu.setItem(REPLAY_FAVORITE_SLOT, buildFavoriteShortcutItem(mainPlugin, replayOwnerUuid, arenaName));
-            menu.setItem(REPLAY_SORT_SLOT, buildReplaySortItem(sortOrder));
+            // Reserved shortcut slots (10 = Last Attempt, 28 = PB Replay, 19 = Favorite Replay,
+            // 37 = Sorter). These are placed after the normal replay list/pagination above so
+            // they can never be overwritten by it, and they are excluded from
+            // REPLAY_MENU_SLOTS/pagination entirely so normal replay entries never render on top
+            // of them either. Each one is gated by the viewing player's resolved replay tier
+            // (permissions.yml default-replay-tier / replay-tiers) - a tier that disables a
+            // feature shows a locked placeholder there instead of the real shortcut.
+            PermissionsManager.ReplayTierSettings tier = mainPlugin.getPermissionsManager().resolveReplayTier(player);
+            menu.setItem(REPLAY_LAST_ATTEMPT_SLOT, tier.lastAttempt
+                    ? buildLastAttemptShortcutItem(mainPlugin, replayOwnerUuid, arenaName)
+                    : buildLockedFeatureItem("Last Attempt"));
+            menu.setItem(REPLAY_PB_SLOT, tier.personalBestReplay
+                    ? buildPersonalBestShortcutItem(mainPlugin, replayOwnerUuid, arenaName)
+                    : buildLockedFeatureItem("PB Replay"));
+            menu.setItem(REPLAY_FAVORITE_SLOT, tier.favoriteReplay
+                    ? buildFavoriteShortcutItem(mainPlugin, replayOwnerUuid, arenaName)
+                    : buildLockedFeatureItem("Favorite Replay"));
+            menu.setItem(REPLAY_SORT_SLOT, tier.replaySorter
+                    ? buildReplaySortItem(sortOrder)
+                    : buildLockedFeatureItem("Replay Sorter"));
         }
+    }
+
+    /**
+     * Placeholder shown in a replay-menu shortcut slot when the viewing player's replay tier
+     * (permissions.yml) doesn't include that feature.
+     */
+    private ItemStack buildLockedFeatureItem(String featureName) {
+        ItemStack item = new ItemStack(Material.BARRIER);
+        ItemMeta meta = item.getItemMeta();
+        if (meta != null) {
+            meta.setDisplayName(ChatColor.RED + featureName + " (Locked)");
+            meta.setLore(List.of(ChatColor.DARK_GRAY + "Your rank doesn't include this feature"));
+            item.setItemMeta(meta);
+        }
+        return item;
     }
 
     /**
@@ -1699,6 +1911,33 @@ public class HotbarManager implements Listener {
             replayItem.setItemMeta(replayMeta);
         }
         return replayItem;
+    }
+
+    private ItemStack buildLastAttemptShortcutItem(SkepiFBPlugin mainPlugin, UUID replayOwnerUuid, String arenaName) {
+        Optional<ReplayMetadata> last = mainPlugin.getReplayManager().getMostRecentReplay(replayOwnerUuid, arenaName);
+        ItemStack item = new ItemStack(Material.CLOCK);
+        if (last.isEmpty()) {
+            ItemMeta emptyMeta = item.getItemMeta();
+            if (emptyMeta != null) {
+                emptyMeta.setDisplayName(ChatColor.YELLOW + "\u2605 Last Attempt");
+                emptyMeta.setLore(List.of(ChatColor.DARK_GRAY + "No attempts recorded yet"));
+                item.setItemMeta(emptyMeta);
+            }
+            return item;
+        }
+        ReplayMetadata metadata = last.get();
+        ItemMeta meta = item.getItemMeta();
+        if (meta != null) {
+            meta.setDisplayName(ChatColor.YELLOW + "\u2605 Last Attempt " + ChatColor.GRAY + "(#" + metadata.getReplayIndex() + ")");
+            meta.setLore(List.of(
+                    ChatColor.GRAY + "Your most recent attempt",
+                    ChatColor.GRAY + "Time: " + String.format(Locale.ROOT, "%.3f", metadata.getDurationSeconds()) + "s",
+                    ChatColor.GRAY + "Blocks: " + metadata.getBlocksPlaced(),
+                    ChatColor.GRAY + "Click to view"
+            ));
+            item.setItemMeta(meta);
+        }
+        return item;
     }
 
     private ItemStack buildPersonalBestShortcutItem(SkepiFBPlugin mainPlugin, UUID replayOwnerUuid, String arenaName) {
@@ -1885,17 +2124,17 @@ public class HotbarManager implements Listener {
         String title = ChatColor.translateAlternateColorCodes('&', menuSection.getString("title", "&aSettings"));
         int size = menuSection.getInt("size", 27);
         Inventory menu = Bukkit.createInventory(new MenuInventoryHolder("settings_menu"), size, title);
-        fillSettingsMenu(menu, menuSection);
+        fillSettingsMenu(menu, menuSection, player);
         player.openInventory(menu);
     }
 
-    private void fillSettingsMenu(Inventory menu, ConfigurationSection menuSection) {
+    private void fillSettingsMenu(Inventory menu, ConfigurationSection menuSection, Player viewer) {
         for (int slot = 0; slot < menu.getSize(); slot++) {
             ConfigurationSection itemSection = configManager.getMenuItemsBySlot("settings_menu").get(slot);
             if (itemSection == null) {
                 continue;
             }
-            menu.setItem(slot, createConfiguredMenuItem(itemSection));
+            menu.setItem(slot, createConfiguredMenuItem(itemSection, viewer));
         }
     }
 
@@ -1979,11 +2218,260 @@ public class HotbarManager implements Listener {
                 if (itemSection == null) continue;
                 int targetSlot = configuredSlot;
                 if (targetSlot >= 0 && targetSlot < menu.getSize()) {
-                    menu.setItem(targetSlot, createConfiguredMenuItem(itemSection));
+                    menu.setItem(targetSlot, createConfiguredMenuItem(itemSection, player));
                 }
             }
         }
+
+        // practice_template_menu/spawn_template_menu render their 5 template slots dynamically
+        // (per-player, per-mode saved data - see PracticeTemplateManager/SpawnTemplateManager),
+        // overwriting whatever static "items" entry (if any) sits at those slots in the config,
+        // exactly like island_menu's islands do above.
+        if ("practice_template_menu".equalsIgnoreCase(menuKey) || "spawn_template_menu".equalsIgnoreCase(menuKey)) {
+            populateTemplateSlots(player, menu, menuKey, menuSection);
+        }
+
         player.openInventory(menu);
+    }
+
+    /**
+     * Fills the 5 dynamic template slots (config key "template-slots") of practice_template_menu
+     * or spawn_template_menu with either the "template-empty" or "template-filled" configured
+     * item (materials/name/lore all configurable), substituting %slot%/%blocks% (practice) or
+     * %x%/%y%/%z%/%yaw%/%pitch% (spawn) placeholders from the player's saved data for whichever
+     * arena/mode they're currently in. If the player isn't currently in an arena, every slot
+     * shows as empty (there's no mode to save/load templates for).
+     */
+    private void populateTemplateSlots(Player player, Inventory menu, String menuKey, ConfigurationSection menuSection) {
+        List<Integer> slots = menuSection.getIntegerList("template-slots");
+        if (slots == null || slots.isEmpty()) {
+            return;
+        }
+        SkepiFBPlugin mainPlugin = (SkepiFBPlugin) plugin;
+        String arena = mainPlugin.getPlayerManager().getPlayerArena(player.getUniqueId());
+        boolean isPractice = "practice_template_menu".equalsIgnoreCase(menuKey);
+        ConfigurationSection emptySection = menuSection.getConfigurationSection("template-empty");
+        ConfigurationSection filledSection = menuSection.getConfigurationSection("template-filled");
+
+        for (int i = 0; i < slots.size() && i < (isPractice
+                ? me.skepi.skepifb.templates.PracticeTemplateManager.MAX_TEMPLATES
+                : me.skepi.skepifb.templates.SpawnTemplateManager.MAX_TEMPLATES); i++) {
+            int templateNumber = i + 1;
+            int inventorySlot = slots.get(i);
+            if (inventorySlot < 0 || inventorySlot >= menu.getSize()) {
+                continue;
+            }
+
+            boolean filled;
+            Map<String, String> placeholders = new java.util.HashMap<>();
+            placeholders.put("%slot%", String.valueOf(templateNumber));
+
+            if (isPractice) {
+                filled = arena != null && mainPlugin.getPracticeTemplateManager().hasTemplate(player.getUniqueId(), arena, templateNumber);
+                if (filled) {
+                    int count = mainPlugin.getPracticeTemplateManager().getBlockCount(player.getUniqueId(), arena, templateNumber);
+                    placeholders.put("%blocks%", String.valueOf(count));
+                } else {
+                    placeholders.put("%blocks%", "0");
+                }
+            } else {
+                filled = arena != null && mainPlugin.getSpawnTemplateManager().hasTemplate(player.getUniqueId(), arena, templateNumber);
+                if (filled) {
+                    me.skepi.skepifb.templates.SpawnTemplate template = mainPlugin.getSpawnTemplateManager().getTemplate(player.getUniqueId(), arena, templateNumber);
+                    if (template != null) {
+                        placeholders.put("%x%", String.format(java.util.Locale.ROOT, "%.3f", template.dx));
+                        placeholders.put("%y%", String.format(java.util.Locale.ROOT, "%.3f", template.dy));
+                        placeholders.put("%z%", String.format(java.util.Locale.ROOT, "%.3f", template.dz));
+                        placeholders.put("%yaw%", String.format(java.util.Locale.ROOT, "%.1f", template.yaw));
+                        placeholders.put("%pitch%", String.format(java.util.Locale.ROOT, "%.1f", template.pitch));
+                    }
+                }
+            }
+
+            ConfigurationSection sourceSection = filled ? filledSection : emptySection;
+            menu.setItem(inventorySlot, buildTemplateSlotItem(sourceSection, placeholders));
+        }
+    }
+
+    /**
+     * Builds a template-slot ItemStack from a "template-empty"/"template-filled" config section,
+     * substituting the given placeholder values into its name and lore.
+     */
+    private ItemStack buildTemplateSlotItem(ConfigurationSection section, Map<String, String> placeholders) {
+        Material material = Material.STONE;
+        String name = "";
+        List<String> lore = List.of();
+        if (section != null) {
+            Material matched = Material.matchMaterial(section.getString("material", "STONE"));
+            if (matched != null) {
+                material = matched;
+            }
+            name = section.getString("name", "");
+            lore = section.getStringList("lore");
+        }
+        ItemStack item = new ItemStack(material);
+        ItemMeta meta = item.getItemMeta();
+        if (meta != null) {
+            if (name != null && !name.isBlank()) {
+                meta.setDisplayName(ChatColor.translateAlternateColorCodes('&', applyPlaceholders(name, placeholders)));
+            }
+            if (lore != null && !lore.isEmpty()) {
+                meta.setLore(lore.stream()
+                        .map(line -> ChatColor.translateAlternateColorCodes('&', applyPlaceholders(line, placeholders)))
+                        .toList());
+            }
+            item.setItemMeta(meta);
+        }
+        return item;
+    }
+
+    private String applyPlaceholders(String text, Map<String, String> placeholders) {
+        if (text == null || placeholders == null || placeholders.isEmpty()) {
+            return text;
+        }
+        String result = text;
+        for (Map.Entry<String, String> entry : placeholders.entrySet()) {
+            result = result.replace(entry.getKey(), entry.getValue());
+        }
+        return result;
+    }
+
+    /**
+     * Loads (plain click) or deletes (shift-click) the saved practice-block template in the
+     * given slot (1-5) for the player's current arena/mode. Works from any menu.
+     */
+    private void handlePracticeTemplateClick(Player player, String menuKey, int templateSlot, boolean isShiftClick) {
+        if (templateSlot < 1 || templateSlot > me.skepi.skepifb.templates.PracticeTemplateManager.MAX_TEMPLATES) {
+            return;
+        }
+        SkepiFBPlugin mainPlugin = (SkepiFBPlugin) plugin;
+        String arena = mainPlugin.getPlayerManager().getPlayerArena(player.getUniqueId());
+        if (arena == null) {
+            player.sendMessage(ChatColor.RED + "You need to be in a FastBuilder mode to use templates.");
+            return;
+        }
+        me.skepi.skepifb.templates.PracticeTemplateManager manager = mainPlugin.getPracticeTemplateManager();
+        if (!manager.hasTemplate(player.getUniqueId(), arena, templateSlot)) {
+            player.sendMessage(ChatColor.RED + "There's no template saved in that slot.");
+            return;
+        }
+        if (isShiftClick) {
+            manager.deleteTemplate(player.getUniqueId(), arena, templateSlot);
+            player.sendMessage(ChatColor.YELLOW + "Deleted practice template " + templateSlot + ".");
+            if ("practice_template_menu".equalsIgnoreCase(menuKey)) {
+                openBlankSubmenu(player, "practice_template_menu");
+            }
+            return;
+        }
+        me.skepi.skepifb.templates.PracticeTemplate template = manager.getTemplate(player.getUniqueId(), arena, templateSlot);
+        player.closeInventory();
+        boolean applied = mainPlugin.getTimerManager().applyPracticeTemplate(player, template);
+        if (applied) {
+            player.sendMessage(ChatColor.GREEN + "Loaded practice template " + templateSlot + " (" + template.size() + " blocks).");
+        } else {
+            player.sendMessage(ChatColor.RED + "Couldn't load that template - are you on an island right now?");
+        }
+    }
+
+    /**
+     * Saves the player's currently-placed practice blocks into the first free slot (1-5) for
+     * their current arena/mode. Works from any menu.
+     */
+    private void handlePracticeTemplateSave(Player player, String menuKey) {
+        SkepiFBPlugin mainPlugin = (SkepiFBPlugin) plugin;
+        String arena = mainPlugin.getPlayerManager().getPlayerArena(player.getUniqueId());
+        if (arena == null) {
+            player.sendMessage(ChatColor.RED + "You need to be in a FastBuilder mode to save a template.");
+            return;
+        }
+        if (!mainPlugin.getTimerManager().isPracticeMode(player.getUniqueId())) {
+            player.sendMessage(ChatColor.RED + "Turn practice mode on and place some blocks first.");
+            return;
+        }
+        List<me.skepi.skepifb.templates.PracticeTemplate.BlockEntry> blocks = mainPlugin.getTimerManager().capturePracticeBlocksRelative(player);
+        if (blocks.isEmpty()) {
+            player.sendMessage(ChatColor.RED + "You don't have any practice blocks placed to save.");
+            return;
+        }
+        me.skepi.skepifb.templates.PracticeTemplateManager manager = mainPlugin.getPracticeTemplateManager();
+        int slot = manager.findFirstEmptySlot(player.getUniqueId(), arena);
+        if (slot == -1) {
+            player.sendMessage(ChatColor.RED + "You already have " + me.skepi.skepifb.templates.PracticeTemplateManager.MAX_TEMPLATES
+                    + " practice templates for this mode - delete one first.");
+            return;
+        }
+        manager.saveTemplate(player.getUniqueId(), arena, slot, blocks);
+        player.sendMessage(ChatColor.GREEN + "Saved practice template " + slot + " (" + blocks.size() + " blocks).");
+        if ("practice_template_menu".equalsIgnoreCase(menuKey)) {
+            openBlankSubmenu(player, "practice_template_menu");
+        }
+    }
+
+    /**
+     * Loads (plain click) or deletes (shift-click) the saved spawn template in the given slot
+     * (1-5) for the player's current arena/mode. Works from any menu.
+     */
+    private void handleSpawnTemplateClick(Player player, String menuKey, int templateSlot, boolean isShiftClick) {
+        if (templateSlot < 1 || templateSlot > me.skepi.skepifb.templates.SpawnTemplateManager.MAX_TEMPLATES) {
+            return;
+        }
+        SkepiFBPlugin mainPlugin = (SkepiFBPlugin) plugin;
+        String arena = mainPlugin.getPlayerManager().getPlayerArena(player.getUniqueId());
+        if (arena == null) {
+            player.sendMessage(ChatColor.RED + "You need to be in a FastBuilder mode to use templates.");
+            return;
+        }
+        me.skepi.skepifb.templates.SpawnTemplateManager manager = mainPlugin.getSpawnTemplateManager();
+        if (!manager.hasTemplate(player.getUniqueId(), arena, templateSlot)) {
+            player.sendMessage(ChatColor.RED + "There's no template saved in that slot.");
+            return;
+        }
+        if (isShiftClick) {
+            manager.deleteTemplate(player.getUniqueId(), arena, templateSlot);
+            player.sendMessage(ChatColor.YELLOW + "Deleted spawn template " + templateSlot + ".");
+            if ("spawn_template_menu".equalsIgnoreCase(menuKey)) {
+                openBlankSubmenu(player, "spawn_template_menu");
+            }
+            return;
+        }
+        me.skepi.skepifb.templates.SpawnTemplate template = manager.getTemplate(player.getUniqueId(), arena, templateSlot);
+        player.closeInventory();
+        boolean applied = mainPlugin.getTimerManager().applySpawnTemplate(player, template);
+        if (applied) {
+            player.sendMessage(ChatColor.GREEN + "Loaded spawn template " + templateSlot + ".");
+        } else {
+            player.sendMessage(ChatColor.RED + "Couldn't load that template - are you on an island right now?");
+        }
+    }
+
+    /**
+     * Saves the player's current position/facing into the first free spawn-template slot (1-5)
+     * for their current arena/mode. Works from any menu.
+     */
+    private void handleSpawnTemplateSave(Player player, String menuKey) {
+        SkepiFBPlugin mainPlugin = (SkepiFBPlugin) plugin;
+        String arena = mainPlugin.getPlayerManager().getPlayerArena(player.getUniqueId());
+        if (arena == null) {
+            player.sendMessage(ChatColor.RED + "You need to be in a FastBuilder mode to save a template.");
+            return;
+        }
+        me.skepi.skepifb.templates.SpawnTemplate captured = mainPlugin.getTimerManager().captureSpawnRelative(player);
+        if (captured == null) {
+            player.sendMessage(ChatColor.RED + "Couldn't determine your island - are you on one right now?");
+            return;
+        }
+        me.skepi.skepifb.templates.SpawnTemplateManager manager = mainPlugin.getSpawnTemplateManager();
+        int slot = manager.findFirstEmptySlot(player.getUniqueId(), arena);
+        if (slot == -1) {
+            player.sendMessage(ChatColor.RED + "You already have " + me.skepi.skepifb.templates.SpawnTemplateManager.MAX_TEMPLATES
+                    + " spawn templates for this mode - delete one first.");
+            return;
+        }
+        manager.saveTemplate(player.getUniqueId(), arena, slot, captured);
+        player.sendMessage(ChatColor.GREEN + "Saved spawn template " + slot + ".");
+        if ("spawn_template_menu".equalsIgnoreCase(menuKey)) {
+            openBlankSubmenu(player, "spawn_template_menu");
+        }
     }
 
     private static final class MenuInventoryHolder implements InventoryHolder {

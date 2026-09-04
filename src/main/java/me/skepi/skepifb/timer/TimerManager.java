@@ -74,8 +74,32 @@ public class TimerManager implements Listener {
     private final Map<UUID, AttemptSession> sessions = new HashMap<>(); 
     private final Map<UUID, BukkitTask> replayTasks = new HashMap<>(); 
     private final Map<UUID, Object> replayNpcs = new HashMap<>(); 
+    // One stacked-hologram line per configured entry in "replay-hologram.lines" (see
+    // ConfigManager#getReplayHologramLines), above the replay ghost NPC's head, per viewer. Each
+    // line's text is re-rendered (not just repositioned) on every frame move, driven by
+    // ReplayPlaceholderManager's 9 placeholders (%xcoordinate%, %ping%, %leftcps%, etc.) against
+    // that frame's RECORDED data (not the viewer's live state) - see spawnReplayInfoLines/
+    // moveReplayInfoLines/removeReplayInfoLines below.
+    private final Map<UUID, List<org.bukkit.entity.ArmorStand>> replayInfoLines = new HashMap<>();
+    // The configured line templates (color codes + placeholders, "none" entries already filtered
+    // out), in the same top-to-bottom order as replayInfoLines' armor stands, so moveReplayInfoLines
+    // knows what raw template to re-run placeholder substitution against for each stand.
+    private final Map<UUID, List<String>> replayInfoLineTemplates = new HashMap<>();
+
+    // Height (in blocks above the replay ghost's feet) of the LOWEST/closest-to-the-NPC hologram
+    // line - i.e. the last one in the configured top-to-bottom list. Deliberately well clear of
+    // where the Citizens username nametag itself renders (~2.3-2.4 blocks up for a player-model
+    // NPC) so the bottom info line never overlaps or fights with the nametag above the ghost's head.
+    private static final double REPLAY_INFO_LINE_BASE_HEIGHT = 2.75;
+    private static final double REPLAY_INFO_LINE_SPACING = 0.27;
+    // Config lines beyond this many are ignored - keeps the hologram stack from growing unbounded
+    // if an admin pastes in a huge list.
+    private static final int REPLAY_INFO_LINE_MAX_CONFIGURED = 10;
     private final java.util.Set<UUID> inReplayMode = new java.util.HashSet<>(); 
     private final java.util.Set<UUID> practiceModePlayers = new java.util.HashSet<>();
+    // One saved checkpoint (position/facing + timer state) per player - see setPracticeCheckpoint/
+    // teleportToPracticeCheckpoint below. Available any time practice mode is on.
+    private final Map<UUID, PracticeCheckpoint> practiceCheckpoints = new HashMap<>();
     private final java.util.Set<UUID> movementStartSuppressed = new java.util.HashSet<>();
     private final Map<UUID, java.util.Set<org.bukkit.Location>> practiceBlocks = new HashMap<>();
     private final Map<UUID, java.util.Set<org.bukkit.Location>> replayFakeBlocks = new HashMap<>();
@@ -740,6 +764,7 @@ public class TimerManager implements Listener {
                 npc.getClass().getMethod("destroy").invoke(npc); 
             } catch (Throwable ignored) {} 
         } 
+        removeReplayInfoLines(playerUuid);
  
         // disable flight 
         try { player.setAllowFlight(false); } catch (Throwable ignored) {} 
@@ -916,9 +941,16 @@ public class TimerManager implements Listener {
                                 if (arena != null) {
                                     ArenaIsland island = arena.findIslandByPlayer(viewer.getUniqueId()).orElse(null);
                                     if (island != null) {
-                                        double baseX = island.getSpawnLocation().getX();
+                                        // Floor X/Z the same way applyReplayBlocks/applyReplayBreaks already do (and the
+                                        // way ReplayManager now WRITES relative coordinates) - island spawn X/Z carry a
+                                        // +0.5 block-center offset that Y never had, so reconstructing the NPC's absolute
+                                        // position from the raw (un-floored) spawn X/Z here overshot by 0.5 on X/Z,
+                                        // visibly placing the replay NPC (and the hologram riding above it, which just
+                                        // follows this same location) half a block off from where it was actually
+                                        // recorded/where the placed blocks appear.
+                                        double baseX = Math.floor(island.getSpawnLocation().getX());
                                         double baseY = island.getSpawnLocation().getY();
-                                        double baseZ = island.getSpawnLocation().getZ();
+                                        double baseZ = Math.floor(island.getSpawnLocation().getZ());
                                         loc = new org.bukkit.Location(ent.getWorld(), baseX + frame.getX(), baseY + frame.getY(), baseZ + frame.getZ(), frame.getYaw(), frame.getPitch());
                                     } else {
                                         loc = new org.bukkit.Location(ent.getWorld(), frame.getX(), frame.getY(), frame.getZ(), frame.getYaw(), frame.getPitch());
@@ -947,6 +979,7 @@ public class TimerManager implements Listener {
                         }
                     } catch (Throwable ignored) {}
                     ent.teleport(loc);
+                    moveReplayInfoLines(playerUuid, loc, frame);
                     try { ent.getClass().getMethod("setGravity", boolean.class).invoke(ent, false); } catch (Throwable ignored) {}
                     try { ent.getClass().getMethod("setAI", boolean.class).invoke(ent, false); } catch (Throwable ignored) {}
                     try { ent.getClass().getMethod("setCustomName", String.class).invoke(ent, ""); } catch (Throwable ignored) {}
@@ -1112,6 +1145,151 @@ public class TimerManager implements Listener {
         applyReplayNpcHeldItem(npc, frame.getHeldMaterial());
     }
 
+    /**
+     * Reads "replay-hologram.lines" from config.yml (up to 10 entries, top-to-bottom as authored
+     * there), drops any entry that's blank or literally "none" (case-insensitive - the documented
+     * way to leave a slot empty), and caps the result at REPLAY_INFO_LINE_MAX_CONFIGURED.
+     */
+    private java.util.List<String> getActiveReplayHologramLines() {
+        java.util.List<String> configured = plugin.getConfigManager().getReplayHologramLines();
+        java.util.List<String> active = new ArrayList<>();
+        for (String raw : configured) {
+            if (active.size() >= REPLAY_INFO_LINE_MAX_CONFIGURED) {
+                break;
+            }
+            if (raw == null) {
+                continue;
+            }
+            String trimmed = raw.trim();
+            if (trimmed.isEmpty() || trimmed.equalsIgnoreCase("none")) {
+                continue;
+            }
+            active.add(trimmed);
+        }
+        return active;
+    }
+
+    /**
+     * Height above the replay ghost's feet for the line at "index" (0 = the first/topmost entry in
+     * the configured list) out of "total" active lines. The LAST configured entry always lands at
+     * REPLAY_INFO_LINE_BASE_HEIGHT (closest to, but deliberately clear of, the npc's own username
+     * nametag) and earlier entries stack upward from there - so "x coordinate at the top" is simply
+     * a matter of listing it first in config.yml, and "jump ticks at the bottom" a matter of
+     * listing it last, with no special-casing needed here.
+     */
+    private static double replayInfoLineHeight(int index, int total) {
+        return REPLAY_INFO_LINE_BASE_HEIGHT + (total - 1 - index) * REPLAY_INFO_LINE_SPACING;
+    }
+
+    /**
+     * Spawns the stack of configurable hologram lines above the replay ghost's head, visible only
+     * to "viewer" - same private-ghost visibility rule the NPC itself uses. Every line's text is
+     * rendered by running it through ReplayPlaceholderManager against "startFrame" - the RECORDED
+     * data for the first frame of this replay (%xcoordinate%, %ping%, %leftcps%, etc. - see that
+     * class), so the lines show this replay's actual recorded values, not the viewer's own live
+     * state.
+     */
+    private void spawnReplayInfoLines(Player viewer, Location baseLoc, ReplayFrame startFrame) {
+        if (viewer == null || baseLoc == null || baseLoc.getWorld() == null) {
+            return;
+        }
+        java.util.List<String> templates = getActiveReplayHologramLines();
+        if (templates.isEmpty()) {
+            return;
+        }
+        java.util.List<org.bukkit.entity.ArmorStand> lines = new ArrayList<>();
+        int total = templates.size();
+        for (int i = 0; i < total; i++) {
+            String template = templates.get(i);
+            try {
+                double height = replayInfoLineHeight(i, total);
+                Location lineLoc = baseLoc.clone().add(0, height, 0);
+                String rendered = ChatColor.translateAlternateColorCodes('&', plugin.getReplayPlaceholderManager().applyRecorded(startFrame, template));
+                org.bukkit.entity.ArmorStand stand = baseLoc.getWorld().spawn(lineLoc, org.bukkit.entity.ArmorStand.class, as -> {
+                    as.setVisible(false);
+                    as.setMarker(true);
+                    as.setGravity(false);
+                    as.setInvulnerable(true);
+                    as.setSmall(true);
+                    as.setBasePlate(false);
+                    as.setCollidable(false);
+                    as.setCustomNameVisible(true);
+                    as.setCustomName(rendered);
+                    as.getPersistentDataContainer().set(
+                            new org.bukkit.NamespacedKey(plugin, "skepifb_hologram"),
+                            org.bukkit.persistence.PersistentDataType.STRING,
+                            "replay_hologram");
+                });
+                for (Player p : Bukkit.getOnlinePlayers()) {
+                    if (!p.getUniqueId().equals(viewer.getUniqueId())) {
+                        try { p.hideEntity(plugin, stand); } catch (Throwable ignored) {}
+                    }
+                }
+                lines.add(stand);
+            } catch (Throwable ignored) {
+                // A single failed line shouldn't take the rest of the stack (or the replay ghost
+                // NPC itself) down with it.
+            }
+        }
+        if (!lines.isEmpty()) {
+            replayInfoLines.put(viewer.getUniqueId(), lines);
+            replayInfoLineTemplates.put(viewer.getUniqueId(), templates);
+        }
+    }
+
+    /**
+     * Keeps the info-line hologram stack riding along above the replay ghost as it's teleported
+     * frame-to-frame in moveNpcToFrame(), AND re-renders each line's text against "frame" - the
+     * RECORDED data for whichever replay frame is currently being played back - so placeholders
+     * like %xcoordinate%/%yaw%/%ping%/%leftcps%/%rightcps% update in sync with the replay's own
+     * motion, showing exactly what was recorded at that instant rather than the viewer's own live
+     * state. No-op if this viewer doesn't have a line stack (e.g. Citizens wasn't present when the
+     * replay started, or every configured line was "none").
+     */
+    private void moveReplayInfoLines(UUID playerUuid, Location baseLoc, ReplayFrame frame) {
+        java.util.List<org.bukkit.entity.ArmorStand> lines = replayInfoLines.get(playerUuid);
+        java.util.List<String> templates = replayInfoLineTemplates.get(playerUuid);
+        if (lines == null || lines.isEmpty() || templates == null || baseLoc == null) {
+            return;
+        }
+        int total = lines.size();
+        for (int i = 0; i < total; i++) {
+            org.bukkit.entity.ArmorStand stand = lines.get(i);
+            if (stand == null || stand.isDead()) {
+                continue;
+            }
+            try {
+                stand.teleport(baseLoc.clone().add(0, replayInfoLineHeight(i, total), 0));
+            } catch (Throwable ignored) {
+            }
+            if (frame != null && i < templates.size()) {
+                try {
+                    String rendered = ChatColor.translateAlternateColorCodes('&', plugin.getReplayPlaceholderManager().applyRecorded(frame, templates.get(i)));
+                    stand.setCustomName(rendered);
+                } catch (Throwable ignored) {
+                }
+            }
+        }
+    }
+
+    /**
+     * Removes and destroys this viewer's info-line hologram stack. Called from every place the
+     * replay ghost NPC itself is torn down (closeReplay, cleanupAllReplays, clearSession), so none
+     * of these armor stands are ever left behind in the world.
+     */
+    private void removeReplayInfoLines(UUID playerUuid) {
+        replayInfoLineTemplates.remove(playerUuid);
+        java.util.List<org.bukkit.entity.ArmorStand> lines = replayInfoLines.remove(playerUuid);
+        if (lines == null) {
+            return;
+        }
+        for (org.bukkit.entity.ArmorStand stand : lines) {
+            if (stand != null && !stand.isDead()) {
+                try { stand.remove(); } catch (Throwable ignored) {}
+            }
+        }
+    }
+
     private Object spawnCitizensNpcForPlayer(Player viewer, String ownerName, ReplayFrame startFrame, UUID ownerUuid) {
         try {
             if (Bukkit.getPluginManager().getPlugin("Citizens") == null) {
@@ -1126,7 +1304,7 @@ public class TimerManager implements Listener {
 
             // set skin trait if available, prefer UUID-based if supported
             try {
-                Class<?> skinTraitClass = Class.forName("net.citizensnpcs.api.trait.trait.SkinTrait");
+                Class<?> skinTraitClass = Class.forName("net.citizensnpcs.trait.SkinTrait");
                 Object trait = npc.getClass().getMethod("getTrait", Class.class).invoke(npc, skinTraitClass);
                 if (trait != null) {
                     try {
@@ -1149,9 +1327,12 @@ public class TimerManager implements Listener {
                         if (arena != null) {
                             ArenaIsland island = arena.findIslandByPlayer(viewer.getUniqueId()).orElse(null);
                             if (island != null) {
-                                double baseX = island.getSpawnLocation().getX();
+                                // Same floor(X/Z) fix as moveNpcToFrame below - keeps the NPC's initial spawn
+                                // position (and the hologram spawned right above it) consistent with every
+                                // frame it's moved to afterward, and with where the recorded blocks appear.
+                                double baseX = Math.floor(island.getSpawnLocation().getX());
                                 double baseY = island.getSpawnLocation().getY();
-                                double baseZ = island.getSpawnLocation().getZ();
+                                double baseZ = Math.floor(island.getSpawnLocation().getZ());
                                 startLoc = new org.bukkit.Location(viewer.getWorld(), baseX + startFrame.getX(), baseY + startFrame.getY(), baseZ + startFrame.getZ(), startFrame.getYaw(), startFrame.getPitch());
                             } else {
                                 startLoc = new org.bukkit.Location(viewer.getWorld(), startFrame.getX(), startFrame.getY(), startFrame.getZ(), startFrame.getYaw(), startFrame.getPitch());
@@ -1213,7 +1394,7 @@ public class TimerManager implements Listener {
                         }
                     } catch (Throwable ignored) {}
                     try {
-                        Class<?> nametagTraitClass = Class.forName("net.citizensnpcs.api.trait.trait.NametagTrait");
+                        Class<?> nametagTraitClass = Class.forName("net.citizensnpcs.trait.NametagTrait");
                         Object trait = npc.getClass().getMethod("getTrait", Class.class).invoke(npc, nametagTraitClass);
                         if (trait != null) {
                             try { trait.getClass().getMethod("setNameVisible", boolean.class).invoke(trait, false); } catch (Throwable ignored) {}
@@ -1225,6 +1406,7 @@ public class TimerManager implements Listener {
                             try { p.hideEntity(plugin, ent); } catch (Throwable ignored) {}
                         }
                     }
+                    spawnReplayInfoLines(viewer, ent.getLocation(), startFrame);
                 }
             } catch (Throwable ignored) {}
 
@@ -1280,6 +1462,7 @@ public class TimerManager implements Listener {
             if (npc != null) {
                 try { npc.getClass().getMethod("destroy").invoke(npc); } catch (Throwable ignored) {}
             }
+            removeReplayInfoLines(u);
         }
         replayFakeBlocks.clear();
         replayRestoreQueues.clear();
@@ -1356,6 +1539,7 @@ public class TimerManager implements Listener {
                 continue;
             }
             session.advanceTick();
+            session.updateJumpTicks(player.isOnGround());
             session.updateLiveSpeed(player.getLocation());
             if (session.getTickCount() % 5 == 0) {
                 session.sampleAverageSpeed(player.getLocation());
@@ -1425,6 +1609,7 @@ public class TimerManager implements Listener {
     public void onPlayerMove(PlayerMoveEvent event) {
         Player player = event.getPlayer();
         UUID playerUuid = player.getUniqueId();
+
         if (!playerManager.isInArena(playerUuid) && !playerManager.isInTestMode(playerUuid)) {
             return;
         }
@@ -1458,7 +1643,7 @@ public class TimerManager implements Listener {
                 if (startAttemptIfNotRunning(player)) {
                     session = sessions.get(playerUuid);
                     if (session != null && session.isRunning()) {
-                        session.recordMovementFrame(player.getLocation(), player.getLocation().getYaw(), player.getLocation().getPitch(), player.isSneaking(), player.isSprinting(), getEquippedBlockMaterialName(player));
+                        recordMovementFrame(session, player);
                     }
                 }
             }
@@ -1466,11 +1651,24 @@ public class TimerManager implements Listener {
         }
 
         if (!inReplayMode.contains(playerUuid) && hasMeaningfulMovement) {
-            session.recordMovementFrame(player.getLocation(), player.getLocation().getYaw(), player.getLocation().getPitch(), player.isSneaking(), player.isSprinting(), getEquippedBlockMaterialName(player));
+            recordMovementFrame(session, player);
             if (shouldFinishAttempt(player)) {
                 handleFinish(player, session);
             }
         }
+    }
+
+    /**
+     * Thin wrapper around AttemptSession#recordMovementFrame that stamps the new frame with the
+     * player's ping and left/right CPS AT THIS EXACT MOMENT (via ReplayPlaceholderManager), so a
+     * replay of this frame later shows what those values genuinely were during the run, not
+     * whoever's watching it. See ReplayPlaceholderManager's class javadoc for why this matters.
+     */
+    private void recordMovementFrame(AttemptSession session, Player player) {
+        int ping = me.skepi.skepifb.placeholder.ReplayPlaceholderManager.getCurrentPing(player);
+        int leftCps = plugin.getReplayPlaceholderManager().getCurrentLeftCps(player.getUniqueId());
+        int rightCps = plugin.getReplayPlaceholderManager().getCurrentRightCps(player.getUniqueId());
+        session.recordMovementFrame(player.getLocation(), player.getLocation().getYaw(), player.getLocation().getPitch(), player.isSneaking(), player.isSprinting(), getEquippedBlockMaterialName(player), ping, leftCps, rightCps);
     }
 
     static boolean hasMeaningfulMovement(PlayerMoveEvent event) {
@@ -1717,6 +1915,7 @@ public class TimerManager implements Listener {
         if (npc != null) {
             try { npc.getClass().getMethod("destroy").invoke(npc); } catch (Throwable ignored) {}
         }
+        removeReplayInfoLines(playerUuid);
         inReplayMode.remove(playerUuid);
 
         // Clear replay-related buffers and tasks
@@ -1734,6 +1933,7 @@ public class TimerManager implements Listener {
 
         // Misc cleanup
         movementStartSuppressed.remove(playerUuid);
+        practiceCheckpoints.remove(playerUuid);
     }
 
     public AttemptSession getSession(UUID playerUuid) {
@@ -2016,16 +2216,46 @@ public class TimerManager implements Listener {
 
     private static final long FINISH_RESPAWN_DELAY_TICKS = 30L;
 
+    /**
+     * Broadcasts a staff alert (to anyone online with "skepifb.admin.alerts") if this completed
+     * run's RAW finish time is at or under the mode's configured "max-time" flag threshold
+     * (arena_settings.yml) - checks the time itself, NOT the player's personal best. A threshold
+     * of 0.000 (the default) disables this entirely for that mode, since no legitimate run can
+     * finish that fast.
+     */
+    private void flagSuspiciouslyFastFinish(Player player, String arenaName, double finishTime) {
+        double maxTime = plugin.getConfigManager().getArenaMaxTime(arenaName);
+        if (maxTime <= 0.0 || finishTime > maxTime) {
+            return;
+        }
+        String formattedTime = String.format(java.util.Locale.ROOT, "%.3f", finishTime);
+        String formattedThreshold = String.format(java.util.Locale.ROOT, "%.3f", maxTime);
+        String alert = ChatColor.RED + "[Anti-Cheat] " + ChatColor.YELLOW + player.getName() + ChatColor.RED
+                + " finished " + ChatColor.YELLOW + arenaName + ChatColor.RED + " in " + ChatColor.YELLOW
+                + formattedTime + "s" + ChatColor.RED + " (flag threshold " + ChatColor.YELLOW + formattedThreshold
+                + "s" + ChatColor.RED + ") - possible cheating.";
+        for (Player staff : Bukkit.getOnlinePlayers()) {
+            if (staff.hasPermission("skepifb.admin.alerts")) {
+                staff.sendMessage(alert);
+            }
+        }
+        plugin.getLogger().warning("[Anti-Cheat] " + player.getName() + " finished " + arenaName + " in " + formattedTime
+                + "s (<= flag threshold " + formattedThreshold + "s)");
+    }
+
     private void handleFinish(Player player, AttemptSession session) {
         session.finishAttempt();
         // Preserve the final displayed actionbar (do not clear to 0.000)
         double finishTime = session.getTimerSeconds();
         String arenaName = playerManager.getPlayerArena(player.getUniqueId());
+        boolean practiceMode = isPracticeMode(player.getUniqueId());
+        if (arenaName != null && !practiceMode) {
+            flagSuspiciouslyFastFinish(player, arenaName, finishTime);
+        }
 
         int receivedCoins = 0;
         boolean isNewPB = false;
         double previousPB = 0.0;
-        boolean practiceMode = isPracticeMode(player.getUniqueId());
         if (arenaName != null && !practiceMode) {
             previousPB = statsManager.getPersonalBest(player.getUniqueId(), arenaName);
             isNewPB = statsManager.updatePersonalBestIfFaster(player.getUniqueId(), arenaName, finishTime);
@@ -2060,9 +2290,26 @@ public class TimerManager implements Listener {
             statsManager.recordCompletion(player.getUniqueId(), arenaName, finishTime);
         }
 
+        // Auto-qualify for the mode's UNVERIFIED leaderboard - unlike the VERIFIED board (which
+        // only an admin can place someone on via "/fb lb add"), every completed, non-practice run
+        // is checked here and, if it's fast enough, the player is placed in the highest open/beaten
+        // slot out of the top 10 for that mode. Silently does nothing if the time doesn't qualify.
+        if (arenaName != null && !practiceMode) {
+            try {
+                plugin.getLeaderboardManager().addEntry(
+                        me.skepi.skepifb.leaderboard.LeaderboardManager.LeaderboardType.UNVERIFIED,
+                        arenaName,
+                        player.getUniqueId(),
+                        player.getName(),
+                        finishTime
+                );
+            } catch (Throwable ignored) {
+            }
+        }
+
         if (arenaName != null && !practiceMode) {
             List<ReplayFrame> replayFrames = session.getFrames();
-            replayManager.recordReplay(player.getUniqueId(), arenaName, player.getName(), finishTime, session.getBlockPlacementCount(), replayFrames, isNewPB);
+            replayManager.recordReplay(player.getUniqueId(), arenaName, player.getName(), finishTime, session.getBlockPlacementCount(), replayFrames, isNewPB, player);
         }
 
         org.bukkit.Location finishLocation = player.getLocation().clone();
@@ -2497,7 +2744,10 @@ public class TimerManager implements Listener {
             return false;
         }
         session.startAttempt(session.hasTrackedBlocks());
-        session.updateCurrentFrame(player.getLocation(), player.getLocation().getYaw(), player.getLocation().getPitch(), player.isSneaking(), player.isSprinting(), getEquippedBlockMaterialName(player));
+        session.updateCurrentFrame(player.getLocation(), player.getLocation().getYaw(), player.getLocation().getPitch(), player.isSneaking(), player.isSprinting(), getEquippedBlockMaterialName(player),
+                me.skepi.skepifb.placeholder.ReplayPlaceholderManager.getCurrentPing(player),
+                plugin.getReplayPlaceholderManager().getCurrentLeftCps(playerUuid),
+                plugin.getReplayPlaceholderManager().getCurrentRightCps(playerUuid));
         String arenaName = playerManager.getPlayerArena(playerUuid);
         if (arenaName != null) {
             statsManager.incrementAttempts(playerUuid, arenaName);
@@ -2544,7 +2794,7 @@ public class TimerManager implements Listener {
             return;
         }
 
-        if (isOutOfBounds(player.getLocation(), island.getSpawnLocation(), arena.getBoundary())) {
+        if (isOutOfBounds(player.getLocation(), island.getSpawnLocation(), arena.getBoundary(), plugin.getConfigManager().isArenaDirectionDiagonal(arenaName))) {
             AttemptSession session = sessions.get(playerUuid);
             if (session != null && session.isRunning()) {
                 saveFailedReplayIfApplicable(player, session);
@@ -2559,27 +2809,52 @@ public class TimerManager implements Listener {
         if (location == null || arena == null || island == null) {
             return false;
         }
-        return !isOutOfBounds(location, island.getSpawnLocation(), arena.getBoundary());
+        boolean diagonal = plugin.getConfigManager().isArenaDirectionDiagonal(arena.getName());
+        return !isOutOfBounds(location, island.getSpawnLocation(), arena.getBoundary(), diagonal);
     }
 
     private boolean isOutOfBounds(Location current, ArenaLocation spawn, ArenaBoundary boundary) {
-        double currentX = current.getX();
-        double currentY = current.getY();
-        double currentZ = current.getZ();
-        double spawnX = spawn.getX();
-        double spawnY = spawn.getY();
-        double spawnZ = spawn.getZ();
+        return isOutOfBounds(current, spawn, boundary, false);
+    }
 
-        if (boundary.getLeft() >= 0 && currentX < spawnX - boundary.getLeft()) {
+    /**
+     * "diagonal" (the arena/mode's "direction" setting in arena_settings.yml - see
+     * ConfigManager#getArenaDirection) rotates the left/right/back/forward boundary axes 45
+     * degrees to the right instead of measuring them straight along world X/Z. In STRAIGHT mode
+     * "right" is a straight line along +X and "forward" a straight line along +Z, same as before
+     * this existed. In DIAGONAL mode "right" instead runs along the (+X,+Z) diagonal and
+     * "forward" along the (+Z,-X) diagonal, using (dx+dz)/2 and (dz-dx)/2 rather than dx/dz
+     * directly - that /2 is deliberate, not a normalization by sqrt(2): each single diagonal step
+     * (dx=+1,dz=+1) advances this axis by exactly 1, so a boundary of e.g. 5 still takes exactly 5
+     * blocks of player movement to reach, just 5 DIAGONAL blocks (moving both X and Z each step)
+     * instead of 5 STRAIGHT blocks along one axis. up/down (Y) are never affected by direction.
+     */
+    private boolean isOutOfBounds(Location current, ArenaLocation spawn, ArenaBoundary boundary, boolean diagonal) {
+        double currentY = current.getY();
+        double spawnY = spawn.getY();
+
+        double rightAxis;
+        double forwardAxis;
+        if (diagonal) {
+            double dx = current.getX() - spawn.getX();
+            double dz = current.getZ() - spawn.getZ();
+            rightAxis = (dx + dz) / 2.0;
+            forwardAxis = (dz - dx) / 2.0;
+        } else {
+            rightAxis = current.getX() - spawn.getX();
+            forwardAxis = current.getZ() - spawn.getZ();
+        }
+
+        if (boundary.getLeft() >= 0 && rightAxis < -boundary.getLeft()) {
             return true;
         }
-        if (boundary.getRight() >= 0 && currentX > spawnX + boundary.getRight()) {
+        if (boundary.getRight() >= 0 && rightAxis > boundary.getRight()) {
             return true;
         }
-        if (boundary.getBack() >= 0 && currentZ < spawnZ - boundary.getBack()) {
+        if (boundary.getBack() >= 0 && forwardAxis < -boundary.getBack()) {
             return true;
         }
-        if (boundary.getForward() >= 0 && currentZ > spawnZ + boundary.getForward()) {
+        if (boundary.getForward() >= 0 && forwardAxis > boundary.getForward()) {
             return true;
         }
         if (boundary.getDown() >= 0 && currentY < spawnY - boundary.getDown()) {
@@ -2680,6 +2955,122 @@ public class TimerManager implements Listener {
         }
     }
 
+    /**
+     * A single saved practice checkpoint - one per player, overwritten every time a new one is
+     * saved (see setPracticeCheckpoint/teleportToPracticeCheckpoint below). Deliberately only
+     * in-memory (cleared on logout/practice-mode-off) rather than persisted to disk - it's a
+     * quick mid-run undo point, not something meant to survive a restart.
+     */
+    private static final class PracticeCheckpoint {
+        final org.bukkit.Location location;
+        final int movementPacketCount;
+        final boolean timerRunning;
+        final java.util.Set<String> trackedBlockKeys;
+
+        PracticeCheckpoint(org.bukkit.Location location, int movementPacketCount, boolean timerRunning,
+                            java.util.Set<String> trackedBlockKeys) {
+            this.location = location;
+            this.movementPacketCount = movementPacketCount;
+            this.timerRunning = timerRunning;
+            this.trackedBlockKeys = trackedBlockKeys;
+        }
+    }
+
+    /**
+     * "world:x:y:z" identity key for a block location - used to diff the blocks placed at
+     * checkpoint-save time against whatever's placed at checkpoint-load time, deliberately not
+     * relying on Location#equals (which also compares yaw/pitch/exact doubles - block-tracking
+     * Locations aren't always constructed identically) for that comparison.
+     */
+    private static String blockKey(org.bukkit.Location loc) {
+        return loc.getWorld().getName() + ":" + loc.getBlockX() + ":" + loc.getBlockY() + ":" + loc.getBlockZ();
+    }
+
+    private static java.util.Set<String> blockKeySet(java.util.Collection<org.bukkit.Location> locations) {
+        java.util.Set<String> keys = new java.util.HashSet<>();
+        if (locations == null) {
+            return keys;
+        }
+        for (org.bukkit.Location loc : locations) {
+            if (loc == null || loc.getWorld() == null) {
+                continue;
+            }
+            keys.add(blockKey(loc));
+        }
+        return keys;
+    }
+
+    /**
+     * Saves the player's current position/facing, elapsed-timer state, and which real build
+     * blocks are currently placed, as their one practice checkpoint, overwriting whatever was
+     * saved before. Practice/reference blocks are intentionally NOT part of this - they're a
+     * persistent guide layout the player builds against, not part of the attempt being
+     * checkpointed, so a checkpoint save/restore never touches them.
+     */
+    public void setPracticeCheckpoint(Player player) {
+        if (player == null) {
+            return;
+        }
+        UUID uuid = player.getUniqueId();
+        AttemptSession session = sessions.get(uuid);
+        int movementPacketCount = 0;
+        boolean timerRunning = false;
+        java.util.Set<String> trackedBlockKeys = java.util.Collections.emptySet();
+        if (session != null) {
+            timerRunning = session.isRunning();
+            movementPacketCount = timerRunning ? session.getMovementPacketCount() : session.getFinalMovementPacketCount();
+            trackedBlockKeys = blockKeySet(session.getTrackedBlockLocations(player.getWorld()));
+        }
+        practiceCheckpoints.put(uuid, new PracticeCheckpoint(player.getLocation().clone(),
+                movementPacketCount, timerRunning, trackedBlockKeys));
+        player.sendMessage(ChatColor.GREEN + "Checkpoint saved.");
+    }
+
+    /**
+     * Teleports the player back to their saved practice checkpoint: restores position/facing,
+     * rewinds the elapsed-timer state to exactly what it was when the checkpoint was saved, and
+     * removes any REAL build block placed since (practice/reference blocks are left completely
+     * alone - see setPracticeCheckpoint's javadoc for why).
+     */
+    public void teleportToPracticeCheckpoint(Player player) {
+        if (player == null) {
+            return;
+        }
+        UUID uuid = player.getUniqueId();
+        PracticeCheckpoint checkpoint = practiceCheckpoints.get(uuid);
+        if (checkpoint == null) {
+            player.sendMessage(ChatColor.RED + "You haven't set a checkpoint yet - left-click to set one.");
+            return;
+        }
+
+        AttemptSession session = sessions.get(uuid);
+        if (session != null) {
+            for (org.bukkit.Location loc : session.getTrackedBlockLocations(player.getWorld())) {
+                if (loc == null || loc.getWorld() == null || checkpoint.trackedBlockKeys.contains(blockKey(loc))) {
+                    continue;
+                }
+                org.bukkit.block.Block block = loc.getWorld().getBlockAt(loc);
+                try {
+                    removeBlockAndUpdateNeighbors(block);
+                } catch (Throwable ignored) {
+                }
+                session.removeTrackedBlock(block);
+            }
+            session.restoreCheckpointTimer(checkpoint.movementPacketCount, checkpoint.timerRunning);
+        }
+
+        try {
+            player.teleport(checkpoint.location);
+        } catch (Throwable ignored) {
+        }
+        try {
+            player.setVelocity(new org.bukkit.util.Vector(0, 0, 0));
+        } catch (Throwable ignored) {
+        }
+
+        player.sendMessage(ChatColor.GREEN + "Returned to checkpoint.");
+    }
+
     public boolean isPracticeMode(UUID playerUuid) {
         return playerUuid != null && practiceModePlayers.contains(playerUuid);
     }
@@ -2694,6 +3085,7 @@ public class TimerManager implements Listener {
         if (currentlyEnabled) {
             practiceModePlayers.remove(playerUuid);
             removePracticeBlocks(playerUuid);
+            practiceCheckpoints.remove(playerUuid);
             if (player != null && player.isOnline()) {
                 mainPlugin.getHotbarManager().removePracticeBlocksFromInventory(player);
                 mainPlugin.getHotbarManager().giveHotbarToPlayer(player);
@@ -3262,6 +3654,171 @@ public class TimerManager implements Listener {
             return;
         }
         practiceBlocks.remove(playerUuid);
+    }
+
+    /**
+     * Snapshot of every block currently tracked as a practice block for this player (copy - safe
+     * to iterate/mutate without affecting live state).
+     */
+    public java.util.Set<org.bukkit.Location> getPracticeBlockLocations(UUID playerUuid) {
+        if (playerUuid == null) {
+            return java.util.Collections.emptySet();
+        }
+        java.util.Set<org.bukkit.Location> blocks = practiceBlocks.get(playerUuid);
+        return blocks == null ? java.util.Collections.emptySet() : new java.util.LinkedHashSet<>(blocks);
+    }
+
+    /**
+     * The floored block-integer origin (floor(spawnX), spawnY, floor(spawnZ)) of the island the
+     * player is currently assigned to within their current arena/mode - the same origin
+     * convention used for practice-block template offsets, spawn template offsets, and (as of
+     * the relative-coordinate fix) the replay hologram's relative coordinates. Returns null if
+     * the player isn't currently on an island (not in an arena, or their island couldn't be
+     * resolved).
+     */
+    public org.bukkit.Location getSpawnBlockOrigin(Player player) {
+        if (player == null) {
+            return null;
+        }
+        String arenaName = playerManager.getPlayerArena(player.getUniqueId());
+        if (arenaName == null) {
+            return null;
+        }
+        Arena arena = arenaManager.getArena(arenaName);
+        if (arena == null) {
+            return null;
+        }
+        ArenaIsland island = arena.findIslandByPlayer(player.getUniqueId()).orElse(null);
+        if (island == null) {
+            return null;
+        }
+        ArenaLocation spawn = island.getSpawnLocation();
+        if (spawn == null) {
+            return null;
+        }
+        return new org.bukkit.Location(player.getWorld(), Math.floor(spawn.getX()), spawn.getY(), Math.floor(spawn.getZ()));
+    }
+
+    /**
+     * Captures the player's currently-placed practice blocks as offsets relative to their
+     * current island's spawn origin, for saving into a {@link me.skepi.skepifb.templates.PracticeTemplate}.
+     * Returns an empty list if the player has no island resolved or no practice blocks placed.
+     */
+    public List<me.skepi.skepifb.templates.PracticeTemplate.BlockEntry> capturePracticeBlocksRelative(Player player) {
+        List<me.skepi.skepifb.templates.PracticeTemplate.BlockEntry> result = new ArrayList<>();
+        org.bukkit.Location origin = getSpawnBlockOrigin(player);
+        if (origin == null) {
+            return result;
+        }
+        int baseX = origin.getBlockX();
+        int baseY = origin.getBlockY();
+        int baseZ = origin.getBlockZ();
+        for (org.bukkit.Location loc : getPracticeBlockLocations(player.getUniqueId())) {
+            if (loc == null || loc.getWorld() == null) {
+                continue;
+            }
+            org.bukkit.Material mat;
+            try {
+                mat = loc.getBlock().getType();
+            } catch (Throwable t) {
+                mat = org.bukkit.Material.STONE;
+            }
+            if (mat == org.bukkit.Material.AIR) {
+                continue;
+            }
+            int dx = loc.getBlockX() - baseX;
+            int dy = loc.getBlockY() - baseY;
+            int dz = loc.getBlockZ() - baseZ;
+            result.add(new me.skepi.skepifb.templates.PracticeTemplate.BlockEntry(dx, dy, dz, mat.name()));
+        }
+        return result;
+    }
+
+    /**
+     * Loads a saved practice-block template for the player: turns practice mode on if it isn't
+     * already (if it IS already on, every currently-placed practice block is removed first so
+     * only the template's blocks remain), then places every block in the template at its
+     * position relative to the player's current island spawn and tracks each one as a practice
+     * block - so they behave identically to manually placed ones (removable, cleared when
+     * practice mode is turned back off, etc).
+     */
+    public boolean applyPracticeTemplate(Player player, me.skepi.skepifb.templates.PracticeTemplate template) {
+        if (player == null || template == null || template.size() == 0) {
+            return false;
+        }
+        org.bukkit.Location origin = getSpawnBlockOrigin(player);
+        if (origin == null) {
+            return false;
+        }
+        UUID uuid = player.getUniqueId();
+        if (isPracticeMode(uuid)) {
+            removePracticeBlocks(uuid);
+        } else {
+            practiceModePlayers.add(uuid);
+            hotbarManager.giveHotbarToPlayer(player);
+            refreshStatboardForPlayer(player);
+        }
+        int baseX = origin.getBlockX();
+        int baseY = origin.getBlockY();
+        int baseZ = origin.getBlockZ();
+        for (me.skepi.skepifb.templates.PracticeTemplate.BlockEntry entry : template.getBlocks()) {
+            org.bukkit.Location loc = new org.bukkit.Location(player.getWorld(), baseX + entry.dx, baseY + entry.dy, baseZ + entry.dz);
+            org.bukkit.Material material = org.bukkit.Material.matchMaterial(entry.material);
+            if (material == null) {
+                material = org.bukkit.Material.STONE;
+            }
+            try {
+                loc.getBlock().setType(material, true);
+            } catch (Throwable ignored) {
+            }
+            trackPracticeBlock(uuid, loc);
+        }
+        return true;
+    }
+
+    /**
+     * Captures the player's current position/facing as offsets relative to their current
+     * island's spawn origin, for saving into a {@link me.skepi.skepifb.templates.SpawnTemplate}.
+     * Returns null if the player has no island resolved.
+     */
+    public me.skepi.skepifb.templates.SpawnTemplate captureSpawnRelative(Player player) {
+        org.bukkit.Location origin = getSpawnBlockOrigin(player);
+        if (origin == null) {
+            return null;
+        }
+        org.bukkit.Location loc = player.getLocation();
+        double dx = loc.getX() - origin.getBlockX();
+        double dy = loc.getY() - origin.getBlockY();
+        double dz = loc.getZ() - origin.getBlockZ();
+        return new me.skepi.skepifb.templates.SpawnTemplate(dx, dy, dz, loc.getYaw(), loc.getPitch());
+    }
+
+    /**
+     * Loads a saved spawn template: resolves it against the player's current island spawn
+     * origin and sets it as their temporary spawn (same mechanism as the existing manual
+     * "set spawn" action), then teleports them there immediately.
+     */
+    public boolean applySpawnTemplate(Player player, me.skepi.skepifb.templates.SpawnTemplate template) {
+        if (player == null || template == null) {
+            return false;
+        }
+        org.bukkit.Location origin = getSpawnBlockOrigin(player);
+        if (origin == null) {
+            return false;
+        }
+        org.bukkit.Location target = new org.bukkit.Location(
+                player.getWorld(),
+                origin.getBlockX() + template.dx,
+                origin.getBlockY() + template.dy,
+                origin.getBlockZ() + template.dz,
+                template.yaw,
+                template.pitch);
+        playerManager.setTemporarySpawn(player.getUniqueId(), target);
+        try {
+            player.teleport(target);
+        } catch (Throwable ignored) {
+        }
+        return true;
     }
 
     public void ensureSession(UUID playerUuid) {

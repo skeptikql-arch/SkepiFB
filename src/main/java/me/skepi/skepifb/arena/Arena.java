@@ -21,7 +21,7 @@ public class Arena {
     private final List<ArenaIsland> islands = new ArrayList<>();
 
     public Arena(String name, String schematic, int islandCount, int spacing, Layout layout, int originX, int originY, int originZ) {
-        this(name, schematic, islandCount, spacing, layout, originX, originY, originZ, ArenaBoundary.defaultBoundary(spacing));
+        this(name, schematic, islandCount, spacing, layout, originX, originY, originZ, ArenaBoundary.defaultBoundary(spacing, layout));
     }
 
     public Arena(String name, String schematic, int islandCount, int spacing, Layout layout, int originX, int originY, int originZ, ArenaBoundary boundary) {
@@ -47,9 +47,12 @@ public class Arena {
     }
 
     private ArenaLocation calculateSpawn(int index) {
+        // Islands are always laid out in a straight line - only X changes between islands, Z stays
+        // constant - regardless of layout. "layout"/"inclined" only controls the shape of each
+        // island's build boundary (rotated 45 degrees - see TimerManager#isOutOfBounds), not where
+        // the islands themselves are physically placed.
         int offsetX = (index - 1) * spacing;
-        int offsetZ = layout == Layout.DIAGONAL ? (index - 1) * spacing : 0;
-        return new ArenaLocation(originX - offsetX + 0.5, originY, originZ + offsetZ + 0.5, spawnYaw, spawnPitch);
+        return new ArenaLocation(originX - offsetX + 0.5, originY, originZ + 0.5, spawnYaw, spawnPitch);
     }
 
     public float getSpawnYaw() {

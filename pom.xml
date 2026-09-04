@@ -3,7 +3,7 @@
     <modelVersion>4.0.0</modelVersion>
     <groupId>me.skepi</groupId>
     <artifactId>skepifb</artifactId>
-    <version>1.0.0</version>
+    <version>26.2</version>
     <name>SkepiFB</name>
     <description>FastBuilder arena foundation plugin for Paper 1.21.8</description>
     <properties>
@@ -63,6 +63,7 @@
     </dependencies>
 
     <build>
+        <finalName>skepifb-1.1</finalName>
         <resources>
             <resource>
                 <directory>src/main/resources</directory>
@@ -97,7 +98,7 @@
                             <addDefaultImplementationEntries>true</addDefaultImplementationEntries>
                         </manifest>
                     </archive>
-                    <finalName>${project.artifactId}-${project.version}</finalName>
+                    <finalName>skepifb-1.1</finalName>
                     <forceCreation>true</forceCreation>
                 </configuration>
             </plugin>
