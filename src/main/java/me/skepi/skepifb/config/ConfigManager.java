@@ -41,10 +41,22 @@ public class ConfigManager {
     private static final int DEFAULT_FINISH_REWARD_NORMAL = 30;
     private static final String DEFAULT_ARENA_START_MODE = "BLOCK";
     private static final String DEFAULT_ARENA_FINISH_MODE = "PLATE";
+    private static final String DEFAULT_ARENA_DIRECTION = "STRAIGHT";
+    private static final double DEFAULT_ARENA_MAX_TIME = 0.000;
 
     private final JavaPlugin plugin;
     private final File configFile;
     private final File menuConfigFile;
+    private final File menusFolder;
+    private final File islandSwitcherMenuFile;
+    private final File replaysMenuFile;
+    private final File settingsMenuFile;
+    private final File fastbuilderSettingsFile;
+    private final File cosmeticMenuFile;
+    private final File modeSwitcherMenuFile;
+    private final File practiceTemplateMenuFile;
+    private final File spawnTemplateMenuFile;
+    private final File customMenusFile;
     private final File arenaSettingsFile;
     private YamlConfiguration configuration;
     private YamlConfiguration menuConfiguration;
@@ -58,7 +70,23 @@ public class ConfigManager {
             dataFolder.mkdirs();
         }
         this.configFile = new File(dataFolder, "config.yml");
+        // Legacy single-file location, kept only so a pre-existing menu.yml can be migrated into
+        // the split files below (see migrateLegacyMenuFileIfPresent()). The plugin never writes to
+        // this path again once that migration has happened.
         this.menuConfigFile = new File(dataFolder, "menu.yml");
+        this.menusFolder = new File(dataFolder, "menus");
+        if (!menusFolder.exists()) {
+            menusFolder.mkdirs();
+        }
+        this.islandSwitcherMenuFile = new File(menusFolder, "island_switcher_menu.yml");
+        this.replaysMenuFile = new File(menusFolder, "replays_menu.yml");
+        this.settingsMenuFile = new File(menusFolder, "settings_menu.yml");
+        this.fastbuilderSettingsFile = new File(menusFolder, "fastbuilder_settings.yml");
+        this.cosmeticMenuFile = new File(menusFolder, "cosmetic_menu.yml");
+        this.modeSwitcherMenuFile = new File(menusFolder, "mode_switcher_menu.yml");
+        this.practiceTemplateMenuFile = new File(menusFolder, "practice_template_menu.yml");
+        this.spawnTemplateMenuFile = new File(menusFolder, "spawn_template_menu.yml");
+        this.customMenusFile = new File(menusFolder, "custom_menus.yml");
         this.arenaSettingsFile = new File(dataFolder, "arena_settings.yml");
         createDefaultConfigIfMissing();
         // THE ACTUAL BUG behind "settings menu not configured" / mode changer missing / island
@@ -69,15 +97,163 @@ public class ConfigManager {
         // completely empty file. Calling it here, independently, with its own "does menu.yml
         // exist" guard (already in the method), means menu.yml regenerates whenever IT is missing,
         // regardless of whether config.yml is.
-        createDefaultMenuConfigIfMissing();
+        //
+        // menu.yml itself has since been split into one file per built-in menu, plus
+        // custom_menus.yml for everything else, all under a menus/ folder - see
+        // createDefaultMenuFilesIfMissing() and loadMenuConfigurations(). menuConfiguration below
+        // remains a single in-memory MERGED view of all of those files combined, purely so every
+        // other class that already reads through ConfigManager's menu-lookup methods (getMenuSection,
+        // getMenuItemsBySlot, getIslandMenuSection, etc.) keeps working completely unchanged - only
+        // the on-disk storage is split, nothing about how the rest of the plugin reads menus is any
+        // different.
+        createDefaultMenuFilesIfMissing();
         this.configuration = YamlConfiguration.loadConfiguration(configFile);
-        this.menuConfiguration = YamlConfiguration.loadConfiguration(menuConfigFile);
+        this.menuConfiguration = loadMergedMenuConfiguration();
         this.arenaSettingsConfiguration = loadArenaSettingsConfiguration();
         ensureCosmeticsShopMenuEntry();
         ensurePracticeModeMenuEntry();
         ensureLeaveConfirmationMenuEntry();
         ensureArenaSettingsFile();
         ensurePracticeBlockHotbarEntry();
+        ensurePracticeCheckpointHotbarEntry();
+        ensureIslandNpcConfigSection();
+        ensureIslandNpcDebugToggle();
+        ensureReplayHologramConfigSection();
+        ensureAutoAddModeToggle();
+        ensurePeriodicMessagesConfigSection();
+    }
+
+    // Self-healing migration for installs whose config.yml predates the island NPC feature -
+    // createDefaultConfigIfMissing() only ever writes the template once, on first-ever startup,
+    // so an existing server never receives new top-level keys added later on their own. Adds the
+    // "island-npc:" section with the same defaults a fresh install ships with, only if it's
+    // entirely absent; never touches it if the admin already has one, even a partial one.
+    private void ensureIslandNpcConfigSection() {
+        if (configuration.contains("island-npc")) {
+            return;
+        }
+        ConfigurationSection section = configuration.createSection("island-npc");
+        section.set("enabled", true);
+        section.set("name", "&bFastbuilder");
+        section.set("click-menu", "mode_changer_menu");
+        section.set("debug", false);
+        ConfigurationSection offset = section.createSection("offset");
+        offset.set("x", -1.0);
+        offset.set("y", 0.0);
+        offset.set("z", -1.0);
+        try {
+            configuration.save(configFile);
+            plugin.getLogger().info("Added the missing \"island-npc:\" section to config.yml (island NPCs are a "
+                    + "new feature - see config.yml for the offset/name/click-menu options).");
+        } catch (IOException ex) {
+            plugin.getLogger().warning("Unable to save config.yml after adding the missing island-npc section: " + ex.getMessage());
+        }
+    }
+
+    // Same self-healing pattern as ensureIslandNpcConfigSection() above, for the newer
+    // "island-npc.debug" toggle - existing installs already have an "island-npc" section (so the
+    // whole-section check above skips them) but won't have this specific key yet.
+    private void ensureIslandNpcDebugToggle() {
+        if (configuration.contains("island-npc.debug")) {
+            return;
+        }
+        configuration.set("island-npc.debug", false);
+        try {
+            configuration.save(configFile);
+            plugin.getLogger().info("Added the missing \"island-npc.debug: false\" option to config.yml - set it to "
+                    + "true to log detailed skin/rename troubleshooting info to console for the island NPC feature.");
+        } catch (IOException ex) {
+            plugin.getLogger().warning("Unable to save config.yml after adding the missing island-npc.debug option: " + ex.getMessage());
+        }
+    }
+
+    // Same self-healing pattern as ensureIslandNpcConfigSection() above, for the newer
+    // replay-hologram.lines section (previously a hardcoded, non-functional label list in
+    // TimerManager - existing installs won't have this key at all).
+    private static final java.util.List<String> DEFAULT_REPLAY_HOLOGRAM_LINES = java.util.List.of(
+            "&b&lX: &f%xcoordinate%",
+            "&b&lY: &f%ycoordinate%",
+            "&b&lZ: &f%zcoordinate%",
+            "&d&lYaw: &f%yaw% &7| &d&lPitch: &f%pitch%",
+            "&a&lPing: &f%ping%ms",
+            "&e&lCPS: &f%leftcps% &7/ &f%rightcps%",
+            "&6&lJump Ticks: &f%jumpticks%",
+            "none",
+            "none",
+            "none"
+    );
+
+    private void ensureReplayHologramConfigSection() {
+        if (configuration.contains("replay-hologram")) {
+            return;
+        }
+        ConfigurationSection section = configuration.createSection("replay-hologram");
+        section.set("lines", DEFAULT_REPLAY_HOLOGRAM_LINES);
+        try {
+            configuration.save(configFile);
+            plugin.getLogger().info("Added the missing \"replay-hologram:\" section to config.yml (customizable "
+                    + "replay hologram lines are a new feature - see config.yml for the \"lines\" list, up to 10 "
+                    + "entries, \"none\" to leave a slot empty).");
+        } catch (IOException ex) {
+            plugin.getLogger().warning("Unable to save config.yml after adding the missing replay-hologram section: " + ex.getMessage());
+        }
+    }
+
+    // Same self-healing pattern as ensureIslandNpcConfigSection() above, for the newer
+    // periodic-messages.messages section (3 configurable slots randomly broadcast to all online
+    // players every "interval-seconds" seconds, alongside a 4th fixed/non-configurable SkepiFB
+    // credit message - see PeriodicMessageManager). Existing installs won't have this key at all.
+    private static final java.util.List<String> DEFAULT_PERIODIC_MESSAGES = java.util.List.of(
+            "&aTip: &fType /fb help to see every command.",
+            "&aTip: &fRight-click the NPC on your island to switch modes.",
+            "&aTip: &fType /stats to view your personal best times."
+    );
+
+    // Default broadcast interval, in seconds, between periodic chat messages. 600 = 10 minutes.
+    private static final int DEFAULT_PERIODIC_MESSAGE_INTERVAL_SECONDS = 600;
+
+    private void ensurePeriodicMessagesConfigSection() {
+        boolean changed = false;
+        ConfigurationSection section = configuration.getConfigurationSection("periodic-messages");
+        if (section == null) {
+            section = configuration.createSection("periodic-messages");
+            section.set("messages", DEFAULT_PERIODIC_MESSAGES);
+            changed = true;
+        }
+        // Separate check so existing installs that already have "periodic-messages.messages" (but
+        // predate the interval-seconds option) get it added too, instead of being skipped
+        // entirely by the section-already-exists check above.
+        if (!section.contains("interval-seconds")) {
+            section.set("interval-seconds", DEFAULT_PERIODIC_MESSAGE_INTERVAL_SECONDS);
+            changed = true;
+        }
+        if (!changed) {
+            return;
+        }
+        try {
+            configuration.save(configFile);
+            plugin.getLogger().info("Added the missing \"periodic-messages:\" section (and/or its "
+                    + "\"interval-seconds\" option) to config.yml - 3 configurable messages randomly "
+                    + "broadcast to all online players every \"interval-seconds\" seconds (600 by default) - "
+                    + "see config.yml).");
+        } catch (IOException ex) {
+            plugin.getLogger().warning("Unable to save config.yml after adding the missing periodic-messages section: " + ex.getMessage());
+        }
+    }
+
+    // Same self-healing pattern as ensureIslandNpcConfigSection() above, for the newer
+    // auto-add-new-modes-to-mode-switcher toggle.
+    private void ensureAutoAddModeToggle() {
+        if (configuration.contains("auto-add-new-modes-to-mode-switcher")) {
+            return;
+        }
+        configuration.set("auto-add-new-modes-to-mode-switcher", true);
+        try {
+            configuration.save(configFile);
+        } catch (IOException ex) {
+            plugin.getLogger().warning("Unable to save config.yml after adding the missing "
+                    + "auto-add-new-modes-to-mode-switcher toggle: " + ex.getMessage());
+        }
     }
 
     // Self-healing migration for installs whose config.yml predates the practice_block
@@ -120,6 +296,45 @@ public class ConfigManager {
             configuration.save(configFile);
         } catch (IOException ex) {
             plugin.getLogger().warning("Unable to save config.yml after adding missing practice_block hotbar slot: " + ex.getMessage());
+        }
+    }
+
+    // Same self-healing pattern as ensurePracticeBlockHotbarEntry() above, for the practice
+    // checkpoint item ("practice_checkpoint" action) - shown to a player any time practice mode is
+    // on (see HotbarManager#buildConfiguredHotbarItem); right-click saves a checkpoint
+    // (position/facing/timer state), left-click returns to it. Existing installs never received
+    // slot5 automatically, same reasoning as above.
+    private void ensurePracticeCheckpointHotbarEntry() {
+        ConfigurationSection hotbar = configuration.getConfigurationSection("hotbar");
+        if (hotbar == null) {
+            hotbar = configuration.createSection("hotbar");
+        }
+        ConfigurationSection items = hotbar.getConfigurationSection("items");
+        if (items == null) {
+            items = hotbar.createSection("items");
+        }
+
+        for (String slotKey : items.getKeys(false)) {
+            ConfigurationSection existing = items.getConfigurationSection(slotKey);
+            if (existing != null && "practice_checkpoint".equals(existing.getString("action"))) {
+                return;
+            }
+        }
+
+        if (items.contains("slot5")) {
+            // slot5 is occupied by something else - don't clobber a customized layout.
+            return;
+        }
+
+        ConfigurationSection checkpointSlot = items.createSection("slot5");
+        checkpointSlot.set("name", "&bCheckpoint");
+        checkpointSlot.set("material", "CYAN_DYE");
+        checkpointSlot.set("action", "practice_checkpoint");
+
+        try {
+            configuration.save(configFile);
+        } catch (IOException ex) {
+            plugin.getLogger().warning("Unable to save config.yml after adding missing practice_checkpoint hotbar slot: " + ex.getMessage());
         }
     }
 
@@ -186,9 +401,11 @@ public class ConfigManager {
                 + "actionbar:\n"
                 + "  format: \"&bCurrent Speed: &3%speed% m/s\"\n"
                 + "\n"
-                + "# Replay actionbar displayed while viewing a replay.\n"
+                + "# Replay actionbar displayed while viewing a replay, plus everything else replay-related\n"
+                + "# (playback speed and the hotbar controls used while watching one).\n"
                 + "# Available placeholders: %tick%, %max_tick%, %seconds%, %time%\n"
                 + "replay:\n"
+                + "  restore-per-tick: 100\n"
                 + "  actionbar:\n"
                 + "    format: \"&bReplay %tick%/%max_tick% &8- &e%time%s\"\n"
                 + "  hotbar:\n"
@@ -198,6 +415,11 @@ public class ConfigManager {
                 + "    next:\n"
                 + "      material: BLAZE_ROD\n"
                 + "      name: \"&bNext Tick\"\n"
+                + "    toggle:\n"
+                + "      running-material: RED_DYE\n"
+                + "      running-name: \"&cPause Replay\"\n"
+                + "      paused-material: LIME_DYE\n"
+                + "      paused-name: \"&aStart Replay\"\n"
                 + "    seek:\n"
                 + "      backward:\n"
                 + "        material: SPECTRAL_ARROW\n"
@@ -255,7 +477,7 @@ public class ConfigManager {
                 + "\n"
                 + "# Hotbar configuration\n"
                 + "# Each item has: material, name (with color codes), and action\n"
-                + "# Actions: none, block, practice_block, respawn, island_menu, replays_menu, settings_menu, leave, toggle_practice_mode\n"
+                + "# Actions: none, block, practice_block, practice_checkpoint, respawn, island_menu, replays_menu, settings_menu, leave, toggle_practice_mode\n"
                 + "hotbar:\n"
                 + "  items:\n"
                 + "    slot0:\n"
@@ -278,6 +500,10 @@ public class ConfigManager {
                 + "      name: \"&eIslands\"\n"
                 + "      material: FIREWORK_STAR\n"
                 + "      action: island_menu\n"
+                + "    slot5:\n"
+                + "      name: \"&bCheckpoint\"\n"
+                + "      material: CYAN_DYE\n"
+                + "      action: practice_checkpoint\n"
                 + "    slot6:\n"
                 + "      name: \"&5Replays\"\n"
                 + "      material: BOOK\n"
@@ -290,20 +516,6 @@ public class ConfigManager {
                 + "      name: \"&9Leave\"\n"
                 + "      material: ENDER_EYE\n"
                 + "      action: leave\n"
-                + "replay:\n"
-                + "  restore-per-tick: 100\n"
-                + "  hotbar:\n"
-                + "    previous:\n"
-                + "      material: STICK\n"
-                + "      name: \"&bPrevious Tick\"\n"
-                + "    toggle:\n"
-                + "      running-material: RED_DYE\n"
-                + "      running-name: \"&cPause Replay\"\n"
-                + "      paused-material: LIME_DYE\n"
-                + "      paused-name: \"&aStart Replay\"\n"
-                + "    next:\n"
-                + "      material: STICK\n"
-                + "      name: \"&bNext Tick\"\n"
                 + "\n"
                 + "# Level-up bossbar configuration (the boss bar shown while playing that fills up as you\n"
                 + "# earn XP toward your next level).\n"
@@ -365,6 +577,9 @@ public class ConfigManager {
                 + "  practice_shop: \"default\"\n"
                 + "  island_shop: \"default\"\n"
                 + "\n"
+                + "# Message shown when a player is denied a command or action by permissions.yml.\n"
+                + "no-permission-message: \"&cYou do not have permission to do that.\"\n"
+                + "\n"
                 + "# Statboard configuration (holograms above island spawns)\n"
                 + "statboard:\n"
                 + "  enabled: true\n"
@@ -373,6 +588,42 @@ public class ConfigManager {
                 + "    right: 2.0\n"
                 + "    forward: 1.0\n"
                 + "    up: 1.0\n"
+                + "\n"
+                + "  # Which sections appear in the hologram and in what order, top to bottom. A section that\n"
+                + "  # has nothing to show for a given player (e.g. \"leaderboard\" for someone with no\n"
+                + "  # placements) is skipped entirely - no title, no gap left behind for it either. More\n"
+                + "  # section types may be added here in the future; unrecognized names are just ignored.\n"
+                + "  # Currently available: \"leaderboard\", \"stats\".\n"
+                + "  #\n"
+                + "  # Accepts either a normal YAML list:\n"
+                + "  #   order:\n"
+                + "  #     - \"leaderboard\"\n"
+                + "  #     - \"stats\"\n"
+                + "  # or a single comma-separated line, whichever is easier to edit:\n"
+                + "  #   order: \"leaderboard, stats\"\n"
+                + "  order:\n"
+                + "    - \"leaderboard\"\n"
+                + "    - \"stats\"\n"
+                + "\n"
+                + "  # Number of blank lines inserted between two sections that are both actually showing.\n"
+                + "  # Raise this if the boundary between sections (e.g. leaderboard vs. stats) isn't visually\n"
+                + "  # clear enough.\n"
+                + "  section-spacing: 2\n"
+                + "\n"
+                + "  # Leaderboard section - an extra block of lines only shown while the player currently\n"
+                + "  # holds at least one position (1-10) on ANY mode's leaderboard (leaderboard.yml, /fb lb),\n"
+                + "  # not just their current arena/mode.\n"
+                + "  leaderboard:\n"
+                + "    enabled: true\n"
+                + "    title: \"&d&lGLOBAL LEADERBOARD PLAYER\"\n"
+                + "    # One line per leaderboard placement the player holds, in this format. Placeholders:\n"
+                + "    #   {PLACE} - the position number (e.g. \"4\", no # prefix - the # is already in the\n"
+                + "    #             default format string below)\n"
+                + "    #   {MODE}  - the mode's display name (e.g. \"Snow\")\n"
+                + "    #   {TIME}  - the player's time on that placement, to 3 decimal places (e.g. \"6.900\")\n"
+                + "    # Example: a 6.9s time on Snow mode at position #4 renders as:\n"
+                + "    #   \"&b#4 &eon Snow Mode &7- &b6.900\"\n"
+                + "    line-format: \"&b#{PLACE} &eon {MODE} Mode &7- &b{TIME}\"\n"
                 + "\n"
                 + "  lines:\n"
                 + "    - \"%player%&f's Statboard\"\n"
@@ -399,6 +650,88 @@ public class ConfigManager {
         defaultConfig += "  reset-success: \"&aTemporary spawn cleared.\"\n";
         defaultConfig += "  cannot-set-while-running: \"&cCannot set spawn while an attempt is active.\"\n";
 
+        defaultConfig += "\n# =========================================================================\n";
+        defaultConfig += "# ISLAND NPC - a Citizens NPC (requires the Citizens plugin) that spawns next to an\n";
+        defaultConfig += "# island's spawn point while that island is occupied, wearing the occupying player's own\n";
+        defaultConfig += "# skin, and is removed the moment the island becomes empty again. Right-clicking it opens\n";
+        defaultConfig += "# \"click-menu\" below (mode_changer_menu by default - that's the internal key for what /fb\n";
+        defaultConfig += "# help calls the mode switcher/changer menu - but you can point it at any menu key from\n";
+        defaultConfig += "# menu.yml/custom_menus.yml, e.g. \"island_menu\" or a custom menu's key).\n";
+        defaultConfig += "# =========================================================================\n";
+        defaultConfig += "island-npc:\n";
+        defaultConfig += "  enabled: true\n";
+        defaultConfig += "  name: \"&bFastbuilder\"\n";
+        defaultConfig += "  click-menu: \"mode_changer_menu\"\n";
+        defaultConfig += "  # Logs detailed step-by-step info to console about the NPC's rename/skin process (what\n";
+        defaultConfig += "  # reflection calls succeeded/failed, and the skin trait's state at each step) - turn this on\n";
+        defaultConfig += "  # if the NPC's nametag or skin is ever wrong, then check console/logs after it spawns.\n";
+        defaultConfig += "  debug: false\n";
+        defaultConfig += "  # Offset from the island's spawn point, in blocks.\n";
+        defaultConfig += "  offset:\n";
+        defaultConfig += "    x: -1.0\n";
+        defaultConfig += "    y: 0.0\n";
+        defaultConfig += "    z: -1.0\n";
+
+        defaultConfig += "\n# =========================================================================\n";
+        defaultConfig += "# REPLAY HOLOGRAM - the stack of text lines floating above a replay ghost's head, visible\n";
+        defaultConfig += "# only to the player watching that replay. Up to 10 lines, listed here TOP to BOTTOM exactly\n";
+        defaultConfig += "# as they'll appear in-game (the first line below is the highest/topmost one, the last is the\n";
+        defaultConfig += "# lowest, closest to - but always kept clear of - the ghost's own username nametag).\n";
+        defaultConfig += "#\n";
+        defaultConfig += "# Type the line exactly as \"none\" (no quotes needed) to leave that slot completely empty -\n";
+        defaultConfig += "# no armor stand is even spawned for it, so it costs nothing and shows nothing.\n";
+        defaultConfig += "#\n";
+        defaultConfig += "# Available placeholders (these are REPLAY-ONLY - they only work on these lines, not in\n";
+        defaultConfig += "# chat/scoreboard/statboard): %xcoordinate%, %ycoordinate%, %zcoordinate%, %yaw%, %pitch%,\n";
+        defaultConfig += "# %ping%, %leftcps%, %rightcps%, %jumpticks%. Each shows the value that was actually RECORDED\n";
+        defaultConfig += "# at that instant during the original run being replayed (not the viewer's own live stats).\n";
+        defaultConfig += "# %jumpticks% is the number of ticks the player spent on the ground before their most recent\n";
+        defaultConfig += "# jump during the run - it freezes the instant they leave the ground and resets to 0 the\n";
+        defaultConfig += "# instant they land again.\n";
+        defaultConfig += "# =========================================================================\n";
+        defaultConfig += "replay-hologram:\n";
+        defaultConfig += "  lines:\n";
+        defaultConfig += "    - \"&b&lX: &f%xcoordinate%\"\n";
+        defaultConfig += "    - \"&b&lY: &f%ycoordinate%\"\n";
+        defaultConfig += "    - \"&b&lZ: &f%zcoordinate%\"\n";
+        defaultConfig += "    - \"&d&lYaw: &f%yaw% &7| &d&lPitch: &f%pitch%\"\n";
+        defaultConfig += "    - \"&a&lPing: &f%ping%ms\"\n";
+        defaultConfig += "    - \"&e&lCPS: &f%leftcps% &7/ &f%rightcps%\"\n";
+        defaultConfig += "    - \"&6&lJump Ticks: &f%jumpticks%\"\n";
+        defaultConfig += "    - \"none\"\n";
+        defaultConfig += "    - \"none\"\n";
+        defaultConfig += "    - \"none\"\n";
+
+        defaultConfig += "\n# =========================================================================\n";
+        defaultConfig += "# When a brand-new arena/mode is created with /fb add, automatically place a button for\n";
+        defaultConfig += "# it in mode_changer_menu.yml, in whichever slot is the first one not already configured\n";
+        defaultConfig += "# (border decorations included) - up to that menu's size. If every slot is already taken,\n";
+        defaultConfig += "# nothing is added (the menu is never resized or overwritten) - add one manually instead,\n";
+        defaultConfig += "# same as any other button: material/name/lore, action: mode, mode: <arena name>. This\n";
+        defaultConfig += "# only ever runs for a mode at the moment it's created - it never touches arenas that\n";
+        defaultConfig += "# already existed, so turning this off only stops FUTURE new modes from being auto-added.\n";
+        defaultConfig += "# =========================================================================\n";
+        defaultConfig += "auto-add-new-modes-to-mode-switcher: true\n";
+
+        defaultConfig += "\n# =========================================================================\n";
+        defaultConfig += "# PERIODIC CHAT MESSAGES - every \"interval-seconds\" seconds, one message is randomly chosen\n";
+        defaultConfig += "# and broadcast to every online player. Exactly 3 slots below. Color codes (&) are\n";
+        defaultConfig += "# supported. Use \"none\" to disable a slot (it's simply skipped when picking a random\n";
+        defaultConfig += "# message).\n";
+        defaultConfig += "#\n";
+        defaultConfig += "# interval-seconds: how often (in seconds) a message is broadcast. 600 = 10 minutes by\n";
+        defaultConfig += "# default. Lower it (e.g. to 1) to quickly test your messages, then set it back.\n";
+        defaultConfig += "#\n";
+        defaultConfig += "# A 4th message - crediting SkepiFB itself - always takes part in the same random rotation\n";
+        defaultConfig += "# alongside these 3, but it is fixed and NOT listed here or anywhere else in config.yml.\n";
+        defaultConfig += "# =========================================================================\n";
+        defaultConfig += "periodic-messages:\n";
+        defaultConfig += "  interval-seconds: 600\n";
+        defaultConfig += "  messages:\n";
+        defaultConfig += "    - \"&aTip: &fType /fb help to see every command.\"\n";
+        defaultConfig += "    - \"&aTip: &fRight-click the NPC on your island to switch modes.\"\n";
+        defaultConfig += "    - \"&aTip: &fType /stats to view your personal best times.\"\n";
+
         try {
             Files.write(configFile.toPath(), defaultConfig.getBytes(StandardCharsets.UTF_8));
         } catch (IOException ex) {
@@ -406,11 +739,158 @@ public class ConfigManager {
         }
     }
 
-    private void createDefaultMenuConfigIfMissing() {
-        if (menuConfigFile.exists()) {
+    /**
+     * Routes a top-level menu key to the file (under menus/) it's stored in. Every built-in menu
+     * has its own dedicated file; anything else (custom menus created via /fb menu add, and the
+     * "stat_reset" mini-menu used by the settings menu) lives together in custom_menus.yml/
+     * settings_menu.yml as noted below.
+     */
+    private File menuFileForKey(String key) {
+        if (key == null) {
+            return customMenusFile;
+        }
+        return switch (key) {
+            case "island_menu" -> islandSwitcherMenuFile;
+            case "replay_menu" -> replaysMenuFile;
+            case "settings_menu", "stat_reset" -> settingsMenuFile;
+            case "fastbuilder_settings_menu" -> fastbuilderSettingsFile;
+            case "cosmetics_menu" -> cosmeticMenuFile;
+            case "mode_changer_menu" -> modeSwitcherMenuFile;
+            case "practice_template_menu" -> practiceTemplateMenuFile;
+            case "spawn_template_menu" -> spawnTemplateMenuFile;
+            default -> customMenusFile;
+        };
+    }
+
+    /**
+     * Creates each of the 7 menu files (island_switcher_menu.yml, replays_menu.yml,
+     * settings_menu.yml, fastbuilder_settings.yml, cosmetic_menu.yml, mode_switcher_menu.yml,
+     * custom_menus.yml, all under menus/) that doesn't already exist. A legacy single menu.yml
+     * from before this split (if present) is migrated first - its keys are distributed into the
+     * matching new files - so nobody's existing customizations are lost; menu.yml itself is then
+     * renamed to menu.yml.migrated as a backup rather than deleted. Any key not covered by the
+     * legacy file, or if there was no legacy file at all, falls back to this plugin's normal
+     * bundled defaults for that key.
+     */
+    private void createDefaultMenuFilesIfMissing() {
+        File[] allFiles = {islandSwitcherMenuFile, replaysMenuFile, settingsMenuFile,
+                fastbuilderSettingsFile, cosmeticMenuFile, modeSwitcherMenuFile,
+                practiceTemplateMenuFile, spawnTemplateMenuFile, customMenusFile};
+        boolean anyMissing = false;
+        for (File f : allFiles) {
+            if (!f.exists()) {
+                anyMissing = true;
+                break;
+            }
+        }
+        if (!anyMissing) {
             return;
         }
 
+        YamlConfiguration legacyConfig = null;
+        if (menuConfigFile.exists()) {
+            legacyConfig = YamlConfiguration.loadConfiguration(menuConfigFile);
+        }
+
+        String defaultMenuConfig = buildDefaultMenuConfigText();
+        YamlConfiguration defaultConfig = new YamlConfiguration();
+        try {
+            defaultConfig.loadFromString(defaultMenuConfig);
+        } catch (Exception ex) {
+            plugin.getLogger().warning("Unable to parse built-in menu defaults: " + ex.getMessage());
+        }
+
+        for (File destination : allFiles) {
+            if (destination.exists()) {
+                continue;
+            }
+            YamlConfiguration destConfig = new YamlConfiguration();
+            java.util.Set<String> keysForThisFile = new java.util.LinkedHashSet<>();
+            for (String key : defaultConfig.getKeys(false)) {
+                if (menuFileForKey(key).equals(destination)) {
+                    keysForThisFile.add(key);
+                }
+            }
+            if (legacyConfig != null) {
+                for (String key : legacyConfig.getKeys(false)) {
+                    if (menuFileForKey(key).equals(destination)) {
+                        keysForThisFile.add(key);
+                    }
+                }
+            }
+            for (String key : keysForThisFile) {
+                Object source = (legacyConfig != null && legacyConfig.contains(key))
+                        ? legacyConfig.get(key)
+                        : defaultConfig.get(key);
+                destConfig.set(key, source);
+            }
+            try {
+                destConfig.save(destination);
+            } catch (IOException ex) {
+                plugin.getLogger().warning("Unable to create " + destination.getName() + ": " + ex.getMessage());
+            }
+        }
+
+        if (legacyConfig != null) {
+            try {
+                File backup = new File(menuConfigFile.getParentFile(), "menu.yml.migrated");
+                Files.move(menuConfigFile.toPath(), backup.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                plugin.getLogger().info("Migrated menu.yml into the menus/ folder (split into one file per menu). "
+                        + "The old menu.yml was renamed to menu.yml.migrated as a backup.");
+            } catch (IOException ex) {
+                plugin.getLogger().warning("Migrated menu.yml content into menus/, but couldn't rename the old file: " + ex.getMessage());
+            }
+        }
+    }
+
+    /**
+     * Loads all 7 menu files and merges them into a single in-memory YamlConfiguration, exactly
+     * as if they were still one big menu.yml. Every other menu-lookup method in this class (and
+     * everything in HotbarManager that goes through them) reads this merged view and needs no
+     * awareness that the underlying storage is split across files.
+     */
+    private YamlConfiguration loadMergedMenuConfiguration() {
+        YamlConfiguration merged = new YamlConfiguration();
+        File[] allFiles = {islandSwitcherMenuFile, replaysMenuFile, settingsMenuFile,
+                fastbuilderSettingsFile, cosmeticMenuFile, modeSwitcherMenuFile,
+                practiceTemplateMenuFile, spawnTemplateMenuFile, customMenusFile};
+        for (File file : allFiles) {
+            if (!file.exists()) {
+                continue;
+            }
+            YamlConfiguration source = YamlConfiguration.loadConfiguration(file);
+            for (String key : source.getKeys(false)) {
+                merged.set(key, source.get(key));
+            }
+        }
+        return merged;
+    }
+
+    /**
+     * Splits the in-memory merged menu configuration back out across the 7 menu files, writing
+     * only each file's own keys to it. Called wherever the old code used to save the single
+     * menu.yml (menuConfiguration.save(menuConfigFile)) - see saveMenuConfiguration().
+     */
+    private void saveSplitMenuConfigurations() {
+        File[] allFiles = {islandSwitcherMenuFile, replaysMenuFile, settingsMenuFile,
+                fastbuilderSettingsFile, cosmeticMenuFile, modeSwitcherMenuFile,
+                practiceTemplateMenuFile, spawnTemplateMenuFile, customMenusFile};
+        for (File destination : allFiles) {
+            YamlConfiguration destConfig = new YamlConfiguration();
+            for (String key : menuConfiguration.getKeys(false)) {
+                if (menuFileForKey(key).equals(destination)) {
+                    destConfig.set(key, menuConfiguration.get(key));
+                }
+            }
+            try {
+                destConfig.save(destination);
+            } catch (IOException ex) {
+                plugin.getLogger().warning("Unable to save " + destination.getName() + ": " + ex.getMessage());
+            }
+        }
+    }
+
+    private String buildDefaultMenuConfigText() {
         String defaultMenuConfig = "# SkepiFB menu configuration file\n"
                 + "#\n"
                 + "# Defines every non-shop GUI menu the plugin uses (island browser, mode changer,\n"
@@ -945,16 +1425,240 @@ public class ConfigManager {
                 + "      material: FILLED_MAP\n"
                 + "      name: \"&6Last Failed Attempt\"\n"
                 + "\n"
+                + "# =========================================================================\n"
+                + "# practice_template_menu / spawn_template_menu\n"
+                + "#\n"
+                + "# Opened instead of directly toggling practice mode / setting your spawn (see the\n"
+                + "# \"practice_template_menu\" and \"spawn_template_menu\" actions on the Practice Mode /\n"
+                + "# Spawn Position buttons in fastbuilder_settings.yml). Each holds up to 5 saved\n"
+                + "# templates PER PLAYER, PER FASTBUILDER MODE (arena) - templates saved while playing\n"
+                + "# one mode never show up while playing a different one - and persist across restarts.\n"
+                + "#\n"
+                + "# \"template-slots\" lists which inventory slots (in order, slot 1's item first) render\n"
+                + "# the 5 template buttons - the plugin fills these dynamically every time the menu is\n"
+                + "# opened (empty slots use \"template-empty\", saved ones use \"template-filled\"), so\n"
+                + "# whatever material/name/lore you put directly under those slot numbers in \"items\"\n"
+                + "# below is only ever shown for a split second before being overwritten - configure\n"
+                + "# \"template-empty\"/\"template-filled\" instead, not \"items\" entries at those slots.\n"
+                + "#\n"
+                + "# template-empty/template-filled support placeholders in name/lore:\n"
+                + "#   %slot%   - the template's slot number (1-5)\n"
+                + "#   %blocks% - (practice_template_menu only) how many blocks are saved in that slot\n"
+                + "#   %x% %y% %z% %yaw% %pitch% - (spawn_template_menu only) the saved position, relative\n"
+                + "#                                to island spawn\n"
+                + "#\n"
+                + "# Every template slot's action is already wired up for you as a GLOBAL action - it also\n"
+                + "# works if pasted into ANY OTHER menu in this file, not just these two:\n"
+                + "#   action: practice_template\n"
+                + "#   practicetemplate: 1     # 1-5, loads/deletes (shift-click) that saved template\n"
+                + "#   action: spawn_template\n"
+                + "#   spawntemplate: 1        # 1-5, loads/deletes (shift-click) that saved spawn\n"
+                + "# Saving to the first free slot (max 5) is action: practice_template_save /\n"
+                + "# spawn_template_save - also global, usable in any menu.\n"
+                + "# =========================================================================\n"
+                + "practice_template_menu:\n"
+                + "  title: \"&aPractice Templates\"\n"
+                + "  size: 27\n"
+                + "  max-templates: 5\n"
+                + "  template-slots: [11, 12, 13, 14, 15]\n"
+                + "  items:\n"
+                + "    0:\n"
+                + "      material: GRAY_STAINED_GLASS_PANE\n"
+                + "      name: \"&7\"\n"
+                + "    1:\n"
+                + "      material: GRAY_STAINED_GLASS_PANE\n"
+                + "      name: \"&7\"\n"
+                + "    2:\n"
+                + "      material: GRAY_STAINED_GLASS_PANE\n"
+                + "      name: \"&7\"\n"
+                + "    3:\n"
+                + "      material: GRAY_STAINED_GLASS_PANE\n"
+                + "      name: \"&7\"\n"
+                + "    4:\n"
+                + "      material: BOOK\n"
+                + "      name: \"&aPractice Templates\"\n"
+                + "      lore:\n"
+                + "        - \"&7Save your current practice block\"\n"
+                + "        - \"&7layout, then load it back any time.\"\n"
+                + "        - \"&7Up to 5 templates per mode.\"\n"
+                + "    5:\n"
+                + "      material: GRAY_STAINED_GLASS_PANE\n"
+                + "      name: \"&7\"\n"
+                + "    6:\n"
+                + "      material: GRAY_STAINED_GLASS_PANE\n"
+                + "      name: \"&7\"\n"
+                + "    7:\n"
+                + "      material: GRAY_STAINED_GLASS_PANE\n"
+                + "      name: \"&7\"\n"
+                + "    8:\n"
+                + "      material: GRAY_STAINED_GLASS_PANE\n"
+                + "      name: \"&7\"\n"
+                + "    11:\n"
+                + "      material: GRAY_STAINED_GLASS_PANE\n"
+                + "      name: \"&7Empty Slot 1\"\n"
+                + "      action: practice_template\n"
+                + "      practicetemplate: 1\n"
+                + "    12:\n"
+                + "      material: GRAY_STAINED_GLASS_PANE\n"
+                + "      name: \"&7Empty Slot 2\"\n"
+                + "      action: practice_template\n"
+                + "      practicetemplate: 2\n"
+                + "    13:\n"
+                + "      material: GRAY_STAINED_GLASS_PANE\n"
+                + "      name: \"&7Empty Slot 3\"\n"
+                + "      action: practice_template\n"
+                + "      practicetemplate: 3\n"
+                + "    14:\n"
+                + "      material: GRAY_STAINED_GLASS_PANE\n"
+                + "      name: \"&7Empty Slot 4\"\n"
+                + "      action: practice_template\n"
+                + "      practicetemplate: 4\n"
+                + "    15:\n"
+                + "      material: GRAY_STAINED_GLASS_PANE\n"
+                + "      name: \"&7Empty Slot 5\"\n"
+                + "      action: practice_template\n"
+                + "      practicetemplate: 5\n"
+                + "    21:\n"
+                + "      material: LIME_DYE\n"
+                + "      name: \"&aToggle Practice Mode\"\n"
+                + "      lore:\n"
+                + "        - \"&7Click to turn practice mode\"\n"
+                + "        - \"&7on or off.\"\n"
+                + "      action: toggle_practice_mode\n"
+                + "    23:\n"
+                + "      material: WRITABLE_BOOK\n"
+                + "      name: \"&bSave Current Layout\"\n"
+                + "      lore:\n"
+                + "        - \"&7Save your currently placed\"\n"
+                + "        - \"&7practice blocks as a new template.\"\n"
+                + "        - \"\"\n"
+                + "        - \"&eClick to save\"\n"
+                + "      action: practice_template_save\n"
+                + "    26:\n"
+                + "      material: BARRIER\n"
+                + "      name: \"&cClose\"\n"
+                + "      action: close_menu\n"
+                + "  template-empty:\n"
+                + "    material: GRAY_STAINED_GLASS_PANE\n"
+                + "    name: \"&7Empty Slot %slot%\"\n"
+                + "    lore:\n"
+                + "      - \"&8No template saved here yet\"\n"
+                + "      - \"&8Use \\\"Save Current Layout\\\" to fill it\"\n"
+                + "  template-filled:\n"
+                + "    material: LIME_STAINED_GLASS_PANE\n"
+                + "    name: \"&aTemplate %slot%\"\n"
+                + "    lore:\n"
+                + "      - \"&7Blocks: &f%blocks%\"\n"
+                + "      - \"\"\n"
+                + "      - \"&eClick to load\"\n"
+                + "      - \"&cShift-click to delete\"\n"
+                + "\n"
+                + "spawn_template_menu:\n"
+                + "  title: \"&eSpawn Templates\"\n"
+                + "  size: 27\n"
+                + "  max-templates: 5\n"
+                + "  template-slots: [11, 12, 13, 14, 15]\n"
+                + "  items:\n"
+                + "    0:\n"
+                + "      material: GRAY_STAINED_GLASS_PANE\n"
+                + "      name: \"&7\"\n"
+                + "    1:\n"
+                + "      material: GRAY_STAINED_GLASS_PANE\n"
+                + "      name: \"&7\"\n"
+                + "    2:\n"
+                + "      material: GRAY_STAINED_GLASS_PANE\n"
+                + "      name: \"&7\"\n"
+                + "    3:\n"
+                + "      material: GRAY_STAINED_GLASS_PANE\n"
+                + "      name: \"&7\"\n"
+                + "    4:\n"
+                + "      material: PUFFERFISH\n"
+                + "      name: \"&eSpawn Templates\"\n"
+                + "      lore:\n"
+                + "        - \"&7Save your current position as\"\n"
+                + "        - \"&7a custom spawn, then load it\"\n"
+                + "        - \"&7back any time. Up to 5 per mode.\"\n"
+                + "    5:\n"
+                + "      material: GRAY_STAINED_GLASS_PANE\n"
+                + "      name: \"&7\"\n"
+                + "    6:\n"
+                + "      material: GRAY_STAINED_GLASS_PANE\n"
+                + "      name: \"&7\"\n"
+                + "    7:\n"
+                + "      material: GRAY_STAINED_GLASS_PANE\n"
+                + "      name: \"&7\"\n"
+                + "    8:\n"
+                + "      material: GRAY_STAINED_GLASS_PANE\n"
+                + "      name: \"&7\"\n"
+                + "    11:\n"
+                + "      material: GRAY_STAINED_GLASS_PANE\n"
+                + "      name: \"&7Empty Slot 1\"\n"
+                + "      action: spawn_template\n"
+                + "      spawntemplate: 1\n"
+                + "    12:\n"
+                + "      material: GRAY_STAINED_GLASS_PANE\n"
+                + "      name: \"&7Empty Slot 2\"\n"
+                + "      action: spawn_template\n"
+                + "      spawntemplate: 2\n"
+                + "    13:\n"
+                + "      material: GRAY_STAINED_GLASS_PANE\n"
+                + "      name: \"&7Empty Slot 3\"\n"
+                + "      action: spawn_template\n"
+                + "      spawntemplate: 3\n"
+                + "    14:\n"
+                + "      material: GRAY_STAINED_GLASS_PANE\n"
+                + "      name: \"&7Empty Slot 4\"\n"
+                + "      action: spawn_template\n"
+                + "      spawntemplate: 4\n"
+                + "    15:\n"
+                + "      material: GRAY_STAINED_GLASS_PANE\n"
+                + "      name: \"&7Empty Slot 5\"\n"
+                + "      action: spawn_template\n"
+                + "      spawntemplate: 5\n"
+                + "    21:\n"
+                + "      material: PUFFERFISH\n"
+                + "      name: \"&eSet Temporary Spawn\"\n"
+                + "      lore:\n"
+                + "        - \"&7Left click to set your spawn\"\n"
+                + "        - \"&7to your current position\"\n"
+                + "        - \"&7Right click to reset it\"\n"
+                + "      action: spawn_position\n"
+                + "    23:\n"
+                + "      material: WRITABLE_BOOK\n"
+                + "      name: \"&bSave Current Position\"\n"
+                + "      lore:\n"
+                + "        - \"&7Save your current position\"\n"
+                + "        - \"&7as a new spawn template.\"\n"
+                + "        - \"\"\n"
+                + "        - \"&eClick to save\"\n"
+                + "      action: spawn_template_save\n"
+                + "    26:\n"
+                + "      material: BARRIER\n"
+                + "      name: \"&cClose\"\n"
+                + "      action: close_menu\n"
+                + "  template-empty:\n"
+                + "    material: GRAY_STAINED_GLASS_PANE\n"
+                + "    name: \"&7Empty Slot %slot%\"\n"
+                + "    lore:\n"
+                + "      - \"&8No template saved here yet\"\n"
+                + "      - \"&8Use \\\"Save Current Position\\\" to fill it\"\n"
+                + "  template-filled:\n"
+                + "    material: PUFFERFISH\n"
+                + "    name: \"&eTemplate %slot%\"\n"
+                + "    lore:\n"
+                + "      - \"&7X: &f%x%\"\n"
+                + "      - \"&7Y: &f%y%\"\n"
+                + "      - \"&7Z: &f%z%\"\n"
+                + "      - \"&7Yaw: &f%yaw% &7Pitch: &f%pitch%\"\n"
+                + "      - \"\"\n"
+                + "      - \"&eClick to load\"\n"
+                + "      - \"&cShift-click to delete\"\n"
+                + "\n"
                 + "block_shop:\n"
                 + "  title: \"&dBlock Shop\"\n"
                 + "  size: 54\n"
                 + "  items: {}\n";
-
-        try {
-            Files.write(menuConfigFile.toPath(), defaultMenuConfig.getBytes(StandardCharsets.UTF_8));
-        } catch (IOException ex) {
-            plugin.getLogger().warning("Unable to create default menu.yml: " + ex.getMessage());
-        }
+        return defaultMenuConfig;
     }
 
     private void ensureCosmeticsShopMenuEntry() {
@@ -1225,7 +1929,7 @@ public class ConfigManager {
             ConfigurationSection practiceSlot = fastbuilderItems.createSection("29");
             practiceSlot.set("material", "WHITE_TERRACOTTA");
             practiceSlot.set("name", "&fPractice Mode");
-            practiceSlot.set("action", "toggle_practice_mode");
+            practiceSlot.set("action", "practice_template_menu");
             modified = true;
         }
 
@@ -1262,9 +1966,32 @@ public class ConfigManager {
             ConfigurationSection spawn = fastbuilderItems.createSection("33");
             spawn.set("material", "PUFFERFISH");
             spawn.set("name", "&eSpawn Position");
-            spawn.set("action", "spawn_position");
-            spawn.set("lore", List.of("&7Left click to set spawn", "&7Right click to reset spawn"));
+            spawn.set("action", "spawn_template_menu");
+            spawn.set("lore", List.of("&7Click to manage your spawn", "&7position and saved templates"));
             modified = true;
+        }
+
+        // Migration for existing installs: the "Practice Mode"/"Spawn Position" buttons in
+        // fastbuilder_settings_menu used to act directly (toggle_practice_mode / spawn_position),
+        // but now open the new practice_template_menu/spawn_template_menu instead (which still
+        // contain the original toggle/set-spawn buttons inside them, plus save/load/delete
+        // template slots). Rewrite any slot in fastbuilder_settings_menu still using the old
+        // direct actions so upgraded installs get the new menu-based flow automatically, without
+        // touching those same action strings anywhere else (e.g. inside the new template menus
+        // themselves, which intentionally reuse them for their internal toggle/set-spawn buttons).
+        for (String slotKey : new ArrayList<>(fastbuilderItems.getKeys(false))) {
+            ConfigurationSection itemSection = fastbuilderItems.getConfigurationSection(slotKey);
+            if (itemSection == null) {
+                continue;
+            }
+            String existingAction = itemSection.getString("action");
+            if ("toggle_practice_mode".equals(existingAction)) {
+                itemSection.set("action", "practice_template_menu");
+                modified = true;
+            } else if ("spawn_position".equals(existingAction)) {
+                itemSection.set("action", "spawn_template_menu");
+                modified = true;
+            }
         }
 
         ConfigurationSection settingsMenu = menuConfiguration.getConfigurationSection("settings_menu");
@@ -1629,11 +2356,7 @@ public class ConfigManager {
     }
 
     public void saveMenuConfiguration() {
-        try {
-            menuConfiguration.save(menuConfigFile);
-        } catch (IOException ex) {
-            plugin.getLogger().warning("Unable to save menu.yml: " + ex.getMessage());
-        }
+        saveSplitMenuConfigurations();
     }
 
     public String findMenuKeyByTitle(String title) {
@@ -1698,21 +2421,76 @@ public class ConfigManager {
     }
 
     public void reload() {
-        // Same auto-generation guarantee as the constructor: if config.yml or menu.yml were
+        // Same auto-generation guarantee as the constructor: if config.yml or any menu file were
         // deleted since the server started, /fb reload should recreate them (and re-run the
         // self-healing "ensure" steps for individual built-in menu sections) instead of just
         // loading whatever's left - which used to be nothing, leaving menuConfiguration empty
         // in memory until the next full server restart.
         createDefaultConfigIfMissing();
-        createDefaultMenuConfigIfMissing();
+        createDefaultMenuFilesIfMissing();
         this.configuration = YamlConfiguration.loadConfiguration(configFile);
-        this.menuConfiguration = YamlConfiguration.loadConfiguration(menuConfigFile);
+        this.menuConfiguration = loadMergedMenuConfiguration();
         this.arenaSettingsConfiguration = loadArenaSettingsConfiguration();
         ensureCosmeticsShopMenuEntry();
         ensurePracticeModeMenuEntry();
         ensureLeaveConfirmationMenuEntry();
         ensureArenaSettingsFile();
         ensurePracticeBlockHotbarEntry();
+        ensurePracticeCheckpointHotbarEntry();
+        ensureIslandNpcConfigSection();
+        ensureIslandNpcDebugToggle();
+        ensureReplayHologramConfigSection();
+        ensureAutoAddModeToggle();
+        ensurePeriodicMessagesConfigSection();
+    }
+
+    /**
+     * If enabled ("auto-add-new-modes-to-mode-switcher" in config.yml, true by default), adds a
+     * "mode" button for a brand-new arena into mode_changer_menu.yml's first genuinely free
+     * (entirely unconfigured - border decorations count as taken) slot, up to that menu's
+     * configured size. Does nothing, silently but logged, if every slot is already taken - the
+     * menu is never resized or overwritten to make room. Only ever call this once, right when an
+     * arena is actually created (see FBCommand's /fb add) - never during arena loading at
+     * startup, or every existing arena would get added on every single restart.
+     */
+    public void autoAddModeToSwitcherMenuIfEnabled(String arenaName) {
+        if (arenaName == null || arenaName.isBlank()) {
+            return;
+        }
+        if (!configuration.getBoolean("auto-add-new-modes-to-mode-switcher", true)) {
+            return;
+        }
+        ConfigurationSection menuSection = menuConfiguration.getConfigurationSection("mode_changer_menu");
+        if (menuSection == null) {
+            return;
+        }
+        int size = menuSection.getInt("size", 54);
+        ConfigurationSection items = menuSection.getConfigurationSection("items");
+        if (items == null) {
+            items = menuSection.createSection("items");
+        }
+        int freeSlot = -1;
+        for (int slot = 0; slot < size; slot++) {
+            if (!items.contains(String.valueOf(slot))) {
+                freeSlot = slot;
+                break;
+            }
+        }
+        if (freeSlot < 0) {
+            plugin.getLogger().info("Not auto-adding \"" + arenaName + "\" to mode_changer_menu - every slot is "
+                    + "already taken. Free one up and add it manually if you'd like it there: material/name, "
+                    + "action: mode, mode: " + arenaName + ".");
+            return;
+        }
+        ConfigurationSection newItem = items.createSection(String.valueOf(freeSlot));
+        newItem.set("material", "GRASS_BLOCK");
+        newItem.set("name", "&e" + arenaName);
+        newItem.set("lore", java.util.List.of("&7Click to play " + arenaName));
+        newItem.set("action", "mode");
+        newItem.set("mode", arenaName);
+        saveSplitMenuConfigurations();
+        plugin.getLogger().info("Added \"" + arenaName + "\" to mode_changer_menu at slot " + freeSlot
+                + " (auto-add-new-modes-to-mode-switcher is enabled in config.yml).");
     }
 
     public String getArenaStartMode(String arenaName) {
@@ -1721,6 +2499,45 @@ public class ConfigManager {
 
     public String getArenaFinishMode(String arenaName) {
         return resolveArenaSetting(arenaName, "finish", DEFAULT_ARENA_FINISH_MODE, Set.of("PLATE", "BED"));
+    }
+
+    /**
+     * Returns "STRAIGHT" or "DIAGONAL" for this arena/mode - whether the build boundary around
+     * each island is measured along the normal X/Z axes (straight) or rotated 45 degrees to the
+     * right (diagonal/"inclined"), same self-healing "start"/"finish" pattern above. Seeded, the
+     * first time arena_settings.yml is generated for a given arena, from that arena's own
+     * "layout" (arenas.yml) - an arena created with a diagonal island layout defaults to a
+     * diagonal boundary direction too, though the two can be changed independently afterward by
+     * editing arena_settings.yml directly.
+     */
+    public String getArenaDirection(String arenaName) {
+        return resolveArenaSetting(arenaName, "direction", DEFAULT_ARENA_DIRECTION, Set.of("STRAIGHT", "DIAGONAL"));
+    }
+
+    /**
+     * The suspicious-time flag threshold (seconds) for this arena/mode - a completed, non-practice
+     * run whose RAW finish time (not personal best) is <= this value gets flagged to staff. 0.000
+     * (the default when unset/invalid) disables flagging for that mode entirely.
+     */
+    public double getArenaMaxTime(String arenaName) {
+        if (arenaName == null || arenaName.isBlank()) {
+            return DEFAULT_ARENA_MAX_TIME;
+        }
+        String normalizedArenaName = arenaName.toLowerCase(Locale.ROOT);
+        String raw = readArenaSettingValue(normalizedArenaName, "max-time");
+        if (raw == null || raw.isBlank()) {
+            return DEFAULT_ARENA_MAX_TIME;
+        }
+        try {
+            return Double.parseDouble(raw.trim());
+        } catch (NumberFormatException ex) {
+            plugin.getLogger().warning("Invalid max-time value '" + raw + "' for arena '" + arenaName + "'. Falling back to 0.000 (disabled).");
+            return DEFAULT_ARENA_MAX_TIME;
+        }
+    }
+
+    public boolean isArenaDirectionDiagonal(String arenaName) {
+        return "DIAGONAL".equals(getArenaDirection(arenaName));
     }
 
     private String resolveArenaSetting(String arenaName, String key, String fallback, Set<String> validValues) {
@@ -1760,6 +2577,17 @@ public class ConfigManager {
         return fallback;
     }
 
+    /**
+     * Public trigger for the same self-healing arena_settings.yml pass the constructor/reload()
+     * already run - called right after /fb add creates a brand-new arena (see FBCommand#handleAdd)
+     * so that arena's "start"/"finish"/"direction" entries (the latter seeded from whatever layout
+     * was just passed to /fb add) show up in arena_settings.yml immediately, instead of only after
+     * the next /fb reload or server restart.
+     */
+    public void ensureArenaSettingsEntryExists() {
+        ensureArenaSettingsFile();
+    }
+
     private void ensureArenaSettingsFile() {
         createDefaultArenaSettingsFileIfMissing();
         if (!arenaSettingsLoaded) {
@@ -1770,6 +2598,7 @@ public class ConfigManager {
         File arenasFile = new File(plugin.getDataFolder(), "arenas.yml");
         if (arenasFile.exists()) {
             YamlConfiguration arenasConfiguration = YamlConfiguration.loadConfiguration(arenasFile);
+            boolean changed = false;
             for (String arenaName : arenasConfiguration.getKeys(false)) {
                 if (arenaName == null || arenaName.isBlank()) {
                     continue;
@@ -1781,10 +2610,34 @@ public class ConfigManager {
                 }
                 if (arenaSection.getString("start") == null || arenaSection.getString("start").isBlank()) {
                     arenaSection.set("start", DEFAULT_ARENA_START_MODE);
+                    changed = true;
                 }
                 if (arenaSection.getString("finish") == null || arenaSection.getString("finish").isBlank()) {
                     arenaSection.set("finish", DEFAULT_ARENA_FINISH_MODE);
+                    changed = true;
                 }
+                if (arenaSection.getString("direction") == null || arenaSection.getString("direction").isBlank()) {
+                    // Seed from this arena's own "layout" in arenas.yml (already stored there for
+                    // every arena - see Arena#getLayout/StorageManager) so an arena created with
+                    // /fb add ... diagonal starts out with a diagonal boundary too, instead of
+                    // silently defaulting to straight and needing a second manual edit.
+                    String arenaLayout = arenasConfiguration.getString(arenaName + ".layout", "straight");
+                    boolean diagonalLayout = arenaLayout != null && arenaLayout.trim().equalsIgnoreCase("diagonal");
+                    arenaSection.set("direction", diagonalLayout ? "DIAGONAL" : DEFAULT_ARENA_DIRECTION);
+                    changed = true;
+                }
+                if (!arenaSection.contains("max-time")) {
+                    arenaSection.set("max-time", DEFAULT_ARENA_MAX_TIME);
+                    changed = true;
+                }
+            }
+            if (changed) {
+                // Unlike the rest of this "ensure" method (which previously only ever patched the
+                // in-memory arenaSettingsConfiguration, silently never writing "start"/"finish"
+                // back to arena_settings.yml on disk until some unrelated save happened to fire
+                // later), an actually-missing "direction:" line needs to show up in the file for
+                // server owners to find and edit it - so persist whenever anything above changed.
+                saveArenaSettingsConfiguration();
             }
         }
     }
@@ -2020,11 +2873,28 @@ public class ConfigManager {
         String defaultContent = "# SkepiFB per-arena settings file\n"
                 + "#\n"
                 + "# Optional overrides for individual arenas. An arena not listed here just uses\n"
-                + "# the plugin's normal defaults (BLOCK start, PLATE finish, no island cosmetics).\n"
+                + "# the plugin's normal defaults (BLOCK start, PLATE finish, STRAIGHT direction, no\n"
+                + "# island cosmetics).\n"
                 + "#\n"
                 + "# START: BLOCK or MOVE - how an attempt begins (placing the first block, or\n"
                 + "#        simply moving off the starting island)\n"
                 + "# FINISH: PLATE or BED - how an attempt is detected as finished\n"
+                + "# DIRECTION: STRAIGHT or DIAGONAL - whether this mode's build boundary is measured\n"
+                + "#            along the normal X/Z axes (STRAIGHT) or rotated 45 degrees to the right\n"
+                + "#            (DIAGONAL/\"inclined\") - a boundary of, say, 5 blocks to the right takes\n"
+                + "#            5 actual diagonal blocks to reach in DIAGONAL mode, not 5 blocks along a\n"
+                + "#            single axis. Defaults to this arena's own /fb add layout (straight/\n"
+                + "#            diagonal) the first time this file is generated, but can be changed\n"
+                + "#            independently afterward.\n"
+                + "#\n"
+                + "# max-time: a time (in seconds, e.g. 2.300) low enough that finishing at or under it is\n"
+                + "#           basically impossible legitimately - any completed (non-practice) run whose\n"
+                + "#           finish time is <= this value gets flagged to online staff (anyone with the\n"
+                + "#           \"skepifb.admin.alerts\" permission) as possible cheating. This checks the RAW\n"
+                + "#           finish time itself, NOT the player's personal best. Defaults to 0.000, which\n"
+                + "#           disables flagging entirely for that mode (0.000 or faster can't actually\n"
+                + "#           happen), so this is opt-in per mode - set it once you know roughly what a\n"
+                + "#           legitimately fast time looks like for that mode.\n"
                 + "#\n"
                 + "# island_cosmetics: per-arena island-skin options, grouped by \"mode\" (usually just\n"
                 + "# \"default\" unless the arena supports multiple modes). Each cosmetic needs:\n"
@@ -2038,6 +2908,7 @@ public class ConfigManager {
                 + "# myArena:\n"
                 + "#   start: BLOCK\n"
                 + "#   finish: PLATE\n"
+                + "#   direction: STRAIGHT\n"
                 + "#   island_cosmetics:\n"
                 + "#     default:\n"
                 + "#       classic:\n"
@@ -2078,6 +2949,46 @@ public class ConfigManager {
             }
         }
         return placeholders;
+    }
+
+    /**
+     * Returns "replay-hologram.lines" top-to-bottom exactly as authored in config.yml (up to
+     * whatever length the admin gave it - trimming to 10 and filtering out "none"/blank entries is
+     * TimerManager's job at render time, not this getter's). Falls back to
+     * DEFAULT_REPLAY_HOLOGRAM_LINES if the key is missing or empty, which should only ever happen
+     * in the brief window before ensureReplayHologramConfigSection() has run.
+     */
+    public List<String> getReplayHologramLines() {
+        List<String> lines = configuration.getStringList("replay-hologram.lines");
+        if (lines == null || lines.isEmpty()) {
+            return DEFAULT_REPLAY_HOLOGRAM_LINES;
+        }
+        return lines;
+    }
+
+    /**
+     * Returns the 3 configurable "periodic-messages.messages" entries exactly as authored in
+     * config.yml. Filtering out "none"/blank entries is PeriodicMessageManager's job at broadcast
+     * time, not this getter's - same convention as getReplayHologramLines() above. Falls back to
+     * DEFAULT_PERIODIC_MESSAGES if the key is missing or empty, which should only ever happen in
+     * the brief window before ensurePeriodicMessagesConfigSection() has run.
+     */
+    public List<String> getPeriodicMessages() {
+        List<String> messages = configuration.getStringList("periodic-messages.messages");
+        if (messages == null || messages.isEmpty()) {
+            return DEFAULT_PERIODIC_MESSAGES;
+        }
+        return messages;
+    }
+
+    /**
+     * Returns "periodic-messages.interval-seconds" - how often, in seconds, a random periodic
+     * chat message is broadcast. Defaults to 600 (10 minutes) if the key is missing or invalid.
+     * Set this to 1 in config.yml (then /fb reload) to quickly test messages.
+     */
+    public int getPeriodicMessageIntervalSeconds() {
+        int seconds = configuration.getInt("periodic-messages.interval-seconds", DEFAULT_PERIODIC_MESSAGE_INTERVAL_SECONDS);
+        return seconds > 0 ? seconds : DEFAULT_PERIODIC_MESSAGE_INTERVAL_SECONDS;
     }
 
     public YamlConfiguration getConfiguration() {

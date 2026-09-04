@@ -10,6 +10,7 @@ public enum Layout {
         }
         switch (value.toLowerCase()) {
             case "diagonal":
+            case "inclined":
                 return DIAGONAL;
             case "straight":
             default:

@@ -34,6 +34,10 @@ public final class AttemptSession {
     private double averageSpeed;
     private int speedSampleCount;
     private int nextPlaytimeXpRewardTick;
+    // %jumpticks% bookkeeping - see updateJumpTicks() for the counting rule.
+    private int groundTicksSinceLanding;
+    private int lastJumpTicks;
+    private boolean airborne;
 
     public AttemptSession(UUID playerUuid) {
         this.playerUuid = playerUuid;
@@ -53,6 +57,9 @@ public final class AttemptSession {
         this.speedSampleCount = 0;
         this.attemptId = null;
         this.nextPlaytimeXpRewardTick = 6000;
+        this.groundTicksSinceLanding = 0;
+        this.lastJumpTicks = 0;
+        this.airborne = false;
     }
 
     public UUID getPlayerUuid() {
@@ -94,6 +101,7 @@ public final class AttemptSession {
         frames.clear();
         currentFrame = new ReplayFrame(0);
         resetSpeedTracking();
+        resetJumpTicks();
         frames.add(currentFrame);
         attemptId = java.util.UUID.randomUUID();
         if (preserveTrackedBlocks) {
@@ -151,7 +159,7 @@ public final class AttemptSession {
      * motion smoothly with no stutter, regardless of how fast or slow packets were arriving while
      * it was recorded.
      */
-    public void recordMovementFrame(org.bukkit.Location location, float yaw, float pitch, boolean sneaking, boolean sprinting, String heldMaterial) {
+    public void recordMovementFrame(org.bukkit.Location location, float yaw, float pitch, boolean sneaking, boolean sprinting, String heldMaterial, int ping, int leftCps, int rightCps) {
         if (!running) {
             return;
         }
@@ -166,6 +174,8 @@ public final class AttemptSession {
         currentFrame.setSneaking(sneaking);
         currentFrame.setSprinting(sprinting);
         currentFrame.setHeldMaterial(heldMaterial);
+        currentFrame.setReplayStats(ping, leftCps, rightCps);
+        currentFrame.setJumpTicks(getJumpTicks());
     }
 
     
@@ -176,7 +186,7 @@ public final class AttemptSession {
         blockPlacementCount++;
     }
 
-    public void updateCurrentFrame(org.bukkit.Location location, float yaw, float pitch, boolean sneaking, boolean sprinting, String heldMaterial) {
+    public void updateCurrentFrame(org.bukkit.Location location, float yaw, float pitch, boolean sneaking, boolean sprinting, String heldMaterial, int ping, int leftCps, int rightCps) {
         if (!running || currentFrame == null || location == null) {
             return;
         }
@@ -185,6 +195,8 @@ public final class AttemptSession {
         currentFrame.setSneaking(sneaking);
         currentFrame.setSprinting(sprinting);
         currentFrame.setHeldMaterial(heldMaterial);
+        currentFrame.setReplayStats(ping, leftCps, rightCps);
+        currentFrame.setJumpTicks(getJumpTicks());
     }
 
     public void addArmSwing(String armSwing) {
@@ -255,6 +267,42 @@ public final class AttemptSession {
         attemptId = null;
         resetSpeedTracking();
         resetPlaytimeXpRewardTick();
+        resetJumpTicks();
+    }
+
+    public void resetJumpTicks() {
+        groundTicksSinceLanding = 0;
+        lastJumpTicks = 0;
+        airborne = false;
+    }
+
+    /**
+     * Called once per real server tick (from TimerManager#checkFinishForRunningPlayers) with the
+     * player's current on-ground state, only while an attempt is running. Implements the
+     * %jumpticks% counting rule: while grounded, count up the number of consecutive ticks spent
+     * on the ground; the instant the player leaves the ground (a jump), freeze that count and
+     * stop incrementing it; keep reporting the frozen count for the whole time they're airborne;
+     * reset back to a fresh count of 0 the instant they touch the ground again.
+     */
+    public void updateJumpTicks(boolean onGround) {
+        if (!running) {
+            return;
+        }
+        if (onGround) {
+            if (airborne) {
+                airborne = false;
+                groundTicksSinceLanding = 0;
+            } else {
+                groundTicksSinceLanding++;
+            }
+        } else if (!airborne) {
+            lastJumpTicks = groundTicksSinceLanding;
+            airborne = true;
+        }
+    }
+
+    public int getJumpTicks() {
+        return airborne ? lastJumpTicks : groundTicksSinceLanding;
     }
 
     public void resetSpeedTracking() {
@@ -338,6 +386,26 @@ public final class AttemptSession {
 
     public double getTimerSeconds() {
         return (running ? movementPacketCount : finalMovementPacketCount) * 0.05;
+    }
+
+    public int getMovementPacketCount() {
+        return movementPacketCount;
+    }
+
+    public int getFinalMovementPacketCount() {
+        return finalMovementPacketCount;
+    }
+
+    /**
+     * Rewinds just the elapsed-timer bookkeeping to a previously-saved point (used by smart
+     * practice mode checkpoints) - deliberately touches nothing else (replay frames, block
+     * tracking, attempt id, etc.) so it can't desync anything beyond the scored elapsed time
+     * itself.
+     */
+    public void restoreCheckpointTimer(int movementPacketCount, boolean running) {
+        this.movementPacketCount = movementPacketCount;
+        this.finalMovementPacketCount = movementPacketCount;
+        this.running = running;
     }
 
     public List<ReplayFrame> getFrames() {

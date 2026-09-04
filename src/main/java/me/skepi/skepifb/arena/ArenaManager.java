@@ -79,7 +79,10 @@ public class ArenaManager {
         int originX = (arenaIndex + 1) * 5000;
         int originZ = 0;
         int originY = 100;
-        Arena arena = new Arena(name, schematic, islandCount, spacing, layout, originX, originY, originZ, ArenaBoundary.defaultBoundary(spacing), 0.0f, 0.0f);
+        // Diagonal/"inclined" arenas default to a 45-degree spawn facing so players start out
+        // already facing along the diagonal boundary axis; straight arenas keep the old 0.0f.
+        float spawnYaw = layout == Layout.DIAGONAL ? 45.0f : 0.0f;
+        Arena arena = new Arena(name, schematic, islandCount, spacing, layout, originX, originY, originZ, ArenaBoundary.defaultBoundary(spacing, layout), spawnYaw, 0.0f);
         arenas.put(name.toLowerCase(), arena);
         saveArenas();
 
@@ -217,10 +220,12 @@ public class ArenaManager {
             boolean teleported = player.teleport(spawnLocation);
             if (!teleported) {
                 island.setOccupiedPlayer(null);
+                try { plugin.getIslandNpcManager().syncIsland(arena, island); } catch (Throwable ignored) {}
                 return false;
             }
             plugin.getPlayerManager().trackPlayer(player.getUniqueId(), arena.getName(), island.getIndex());
             try { plugin.getStatboardManager().createStatboard(player.getUniqueId(), arena, island); } catch (Throwable ignored) {}
+            try { plugin.getIslandNpcManager().syncIsland(arena, island); } catch (Throwable ignored) {}
             saveArenas();
             return true;
         }).orElse(false);
@@ -237,6 +242,7 @@ public class ArenaManager {
             island.setOccupiedPlayer(player.getUniqueId());
             plugin.getPlayerManager().trackTestPlayer(player.getUniqueId(), arena.getName(), island.getIndex());
             try { plugin.getStatboardManager().createStatboard(player.getUniqueId(), arena, island); } catch (Throwable ignored) {}
+            try { plugin.getIslandNpcManager().syncIsland(arena, island); } catch (Throwable ignored) {}
             return true;
         }).orElse(false);
     }
@@ -253,6 +259,7 @@ public class ArenaManager {
             arena.findIslandByPlayer(player.getUniqueId()).ifPresent(island -> {
                 island.setOccupiedPlayer(null);
                 restoreIsland(arena, island, player.getUniqueId());
+                try { plugin.getIslandNpcManager().syncIsland(arena, island); } catch (Throwable ignored) {}
             });
             saveArenas();
         }

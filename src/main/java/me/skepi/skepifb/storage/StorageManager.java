@@ -73,7 +73,7 @@ public class StorageManager {
                 int boundaryUp = configuration.getInt(key + ".boundary.up", -1);
                 boundary = new ArenaBoundary(boundaryLeft, boundaryRight, boundaryBack, boundaryDown, boundaryForward, boundaryUp);
             } else {
-                boundary = ArenaBoundary.defaultBoundary(spacing);
+                boundary = ArenaBoundary.defaultBoundary(spacing, layout);
             }
             Arena arena = new Arena(name, schematic, islandCount, spacing, layout, originX, originY, originZ, boundary, spawnYaw, spawnPitch);
             target.put(name.toLowerCase(), arena);

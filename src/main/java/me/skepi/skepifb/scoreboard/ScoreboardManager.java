@@ -80,11 +80,11 @@ public class ScoreboardManager {
                 + "title: \"&6&lSkepiFB\"\n"
                 + "lines:\n"
                 + "  - \"&7Time: %timer%\"\n"
-                + "  - \"&eBlocks: %blocks%\"\n"
-                + "  - \"&dAttempts: %attempts%\"\n"
-                + "  - \"\"\n"
-                + "  - \"&bCoins: %coins%\"\n"
                 + "  - \"&aPB: %pb%\"\n"
+                + "  - \"\"\n"
+                + "  - \"&dAttempts: %attempts%\"\n"
+                + "  - \"&bCoins: %coins%\"\n"
+                + "  - \"&eBlocks: %blocks%\"\n"
                 + "  - \"\"\n"
             + "  - \"&6Session Top\"\n"
             + "  - \"%sessiontop1%\"\n"
@@ -93,15 +93,7 @@ public class ScoreboardManager {
             + "  - \"%sessiontop4%\"\n"
             + "  - \"%sessiontop5%\"\n"
             + "  - \"\"\n"
-            + "  - \"&fCustom Line 1\"\n"
-                + "  - \"&fCustom Line 2\"\n"
-                + "  - \"&fCustom Line 3\"\n"
-                + "  - \"&fCustom Line 4\"\n"
-                + "  - \"&fCustom Line 5\"\n"
-                + "  - \"&fCustom Line 6\"\n"
-                + "  - \"&fCustom Line 7\"\n"
-                + "  - \"&fCustom Line 8\"\n"
-                + "  - \"&fCustom Line 9\"\n";
+            + "  - \"&aexample.net\"\n";
 
         try {
             Files.write(scoreboardFile.toPath(), defaultContent.getBytes(StandardCharsets.UTF_8));

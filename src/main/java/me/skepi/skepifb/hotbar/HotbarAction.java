@@ -4,6 +4,7 @@ public enum HotbarAction {
     NONE("none"),
     BLOCK("block"),
     PRACTICE_BLOCK("practice_block"),
+    PRACTICE_CHECKPOINT("practice_checkpoint"),
     TOOL("tool"),
     RESPAWN("respawn"),
     ISLAND_MENU("island_menu"),

@@ -1,6 +1,6 @@
 name: SkepiFB
 main: me.skepi.skepifb.SkepiFBPlugin
-version: 1.0.0
+version: 26.2
 api-version: 1.21
 description: FastBuilder arena foundation for Paper 1.21.8
 softdepend: [LuckPerms, WorldEdit, Citizens]
@@ -9,3 +9,18 @@ commands:
     description: Manage SkepiFB arenas
     usage: /fb <add|remove|list|join|leave>
     aliases: [fastbuilder]
+  stats:
+    description: View your or another player's FastBuilder stats
+    usage: /stats [player]
+  spectate:
+    description: Spectate another player, or exit spectator mode
+    usage: /spectate <player|exit>
+  spec:
+    description: Spectate another player, or exit spectator mode
+    usage: /spec <player|exit>
+  lb:
+    description: Open the graphical top 10 leaderboard menu
+    usage: /lb [mode]
+  leaderboard:
+    description: Open the graphical top 10 leaderboard menu
+    usage: /leaderboard [mode]

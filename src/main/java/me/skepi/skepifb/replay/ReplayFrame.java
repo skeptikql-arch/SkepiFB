@@ -20,6 +20,18 @@ public final class ReplayFrame {
     private final List<ReplayBlockEvent> breaks = new ArrayList<>();
     private String heldMaterial;
     private boolean coordinatesRelative = false;
+    // Recorded once, at the moment this frame was captured during the LIVE attempt (see
+    // AttemptSession#recordMovementFrame/updateCurrentFrame and TimerManager's call sites) - these
+    // are what the replay hologram plays back later. They are NOT live/current values re-read at
+    // playback time; a replay always shows exactly what the player's ping/CPS actually were at that
+    // instant during the run, the same way position/yaw/pitch already worked before these were added.
+    private int ping;
+    private int leftCps;
+    private int rightCps;
+    // How many consecutive ticks the player spent on the ground before jumping, as of the moment
+    // this frame was captured - see AttemptSession#updateJumpTicks for the actual counting rule
+    // (frozen while airborne, reset to 0 the instant they land again).
+    private int jumpTicks;
 
     public ReplayFrame(int tick) {
         this.tick = tick;
@@ -120,5 +132,31 @@ public final class ReplayFrame {
 
     public void setCoordinatesRelative(boolean coordinatesRelative) {
         this.coordinatesRelative = coordinatesRelative;
+    }
+
+    public int getPing() {
+        return ping;
+    }
+
+    public int getLeftCps() {
+        return leftCps;
+    }
+
+    public int getRightCps() {
+        return rightCps;
+    }
+
+    public void setReplayStats(int ping, int leftCps, int rightCps) {
+        this.ping = ping;
+        this.leftCps = leftCps;
+        this.rightCps = rightCps;
+    }
+
+    public int getJumpTicks() {
+        return jumpTicks;
+    }
+
+    public void setJumpTicks(int jumpTicks) {
+        this.jumpTicks = jumpTicks;
     }
 }

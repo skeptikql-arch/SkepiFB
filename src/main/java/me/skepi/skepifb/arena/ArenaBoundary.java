@@ -43,6 +43,20 @@ public class ArenaBoundary {
     }
 
     public static ArenaBoundary defaultBoundary(int spacing) {
+        return defaultBoundary(spacing, Layout.STRAIGHT);
+    }
+
+    /**
+     * Layout-aware default boundary used whenever an arena is created/loaded without an explicit
+     * boundary of its own. STRAIGHT keeps the old spacing-derived box (so tightly-spaced arenas
+     * don't get an oversized boundary). DIAGONAL ("inclined") always gets the fixed 8/8/8/5/-1/-1
+     * box regardless of spacing, since the diagonal boundary is rotated 45 degrees at check-time
+     * (see TimerManager#isOutOfBounds) and a spacing-derived box there tends to feel far too tight.
+     */
+    public static ArenaBoundary defaultBoundary(int spacing, Layout layout) {
+        if (layout == Layout.DIAGONAL) {
+            return new ArenaBoundary(5, 5, 5, 5, -1, -1);
+        }
         int horizontalBoundary = Math.max(0, spacing / 2 - 2);
         return new ArenaBoundary(horizontalBoundary, horizontalBoundary, horizontalBoundary, 5, -1, -1);
     }

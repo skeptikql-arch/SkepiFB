@@ -82,6 +82,10 @@ public class PlayerManager implements Listener {
     @EventHandler
     public void onPlayerQuit(PlayerQuitEvent event) {
         freePlayerSession(event.getPlayer());
+        try {
+            ((SkepiFBPlugin) plugin).getSpectateManager().clear(event.getPlayer().getUniqueId());
+        } catch (Throwable ignored) {
+        }
     }
 
     @EventHandler
@@ -226,6 +230,7 @@ public class PlayerManager implements Listener {
                     arenaManager.restoreIsland(arena, vacatedIsland);
                 } catch (Throwable ignored) {}
             }
+            try { plugin.getIslandNpcManager().syncIsland(arena, vacatedIsland); } catch (Throwable ignored) {}
         }
         sessions.remove(playerUuid);
         testModePlayers.remove(playerUuid);

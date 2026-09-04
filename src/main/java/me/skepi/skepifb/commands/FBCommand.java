@@ -34,6 +34,7 @@ public class FBCommand implements CommandExecutor {
     private final InventoryManager inventoryManager;
     private final HotbarManager hotbarManager;
     private final LeaderboardManager leaderboardManager;
+    private final me.skepi.skepifb.commands.SpectateCommand spectateCommand;
 
     public FBCommand(SkepiFBPlugin plugin, ArenaManager arenaManager, PlayerManager playerManager, SchematicService schematicService, ScoreboardManager scoreboardManager, InventoryManager inventoryManager, HotbarManager hotbarManager) {
         this.plugin = plugin;
@@ -45,20 +46,56 @@ public class FBCommand implements CommandExecutor {
         this.inventoryManager = inventoryManager;
         this.hotbarManager = hotbarManager;
         this.leaderboardManager = plugin.getLeaderboardManager();
+        this.spectateCommand = new me.skepi.skepifb.commands.SpectateCommand(plugin);
     }
 
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
-        if (!sender.hasPermission("skepifb.admin") && !sender.isOp()) {
-            sender.sendMessage("§cYou do not have permission to use this command.");
-            return true;
-        }
-
         if (args.length == 0) {
+            if (!plugin.getPermissionsManager().hasCommandPermission(sender, "fb.help")) {
+                sender.sendMessage("§cYou do not have permission to use this command.");
+                return true;
+            }
             return handleHelp(sender);
         }
 
         String subcommand = args[0].toLowerCase(Locale.ROOT);
+        // Permission gating moved from a single blanket "skepifb.admin or op required for
+        // literally everything" check to per-subcommand nodes configured in permissions.yml (see
+        // PermissionsManager) - "commands.fb.<name>". Genuinely administrative subcommands default
+        // to requiring skepifb.admin, same as before; join/leave/list/help/replayinfo default to
+        // open (blank node) since those are normal, everyday player actions, not admin actions.
+        // Server owners can tighten or loosen any individual one in permissions.yml.
+        String permissionKey = switch (subcommand) {
+            case "add" -> "fb.add";
+            case "remove" -> "fb.remove";
+            case "list" -> "fb.list";
+            case "join" -> "fb.join";
+            case "xp" -> "fb.xp";
+            case "leave" -> "fb.leave";
+            case "menu" -> "fb.menu";
+            case "reload" -> "fb.reload";
+            case "replayinfo" -> "fb.replayinfo";
+            case "coins" -> "fb.coins";
+            case "lb", "leaderboard" -> "fb.lb";
+            case "replays" -> "fb.replays";
+            case "island" -> "fb.island";
+            case "test" -> "fb.test";
+            case "setfacing" -> "fb.setfacing";
+            case "help" -> "fb.help";
+            case "stats" -> "stats";
+            case "spectate" -> "spectate";
+            default -> null;
+        };
+        if (permissionKey == null) {
+            sender.sendMessage("§cUnknown subcommand. Use /fb help for a command list.");
+            return true;
+        }
+        if (!plugin.getPermissionsManager().hasCommandPermission(sender, permissionKey)) {
+            sender.sendMessage("§cYou do not have permission to use this command.");
+            return true;
+        }
+
         switch (subcommand) {
             case "add":
                 return handleAdd(sender, args);
@@ -93,6 +130,10 @@ public class FBCommand implements CommandExecutor {
                 return handleSetFacing(sender, args);
             case "help":
                 return handleHelp(sender);
+            case "stats":
+                return plugin.getStatsMenuManager().handleStatsCommand(sender, args, 1);
+            case "spectate":
+                return spectateCommand.handle(sender, args, 1);
             default:
                 sender.sendMessage("§cUnknown subcommand. Use /fb help for a command list.");
                 return true;
@@ -106,7 +147,7 @@ public class FBCommand implements CommandExecutor {
         }
 
         if (args.length < 4) {
-            sender.sendMessage("§cUsage: /fb add <arena> <schematic> <islandCount> [spacing] [straight|diagonal]");
+            sender.sendMessage("§cUsage: /fb add <arena> <schematic> <islandCount> [spacing] [straight|inclined]");
             return true;
         }
 
@@ -133,9 +174,11 @@ public class FBCommand implements CommandExecutor {
         }
 
         if (args.length >= 6) {
+            // "inclined" is just the player-facing name for the same DIAGONAL layout - see
+            // Layout#fromString - so both /fb add ... diagonal and /fb add ... inclined work.
             layout = Layout.fromString(args[5]);
-            if (!args[5].equalsIgnoreCase("straight") && !args[5].equalsIgnoreCase("diagonal")) {
-                sender.sendMessage("§cInvalid layout. Use straight or diagonal.");
+            if (!args[5].equalsIgnoreCase("straight") && !args[5].equalsIgnoreCase("diagonal") && !args[5].equalsIgnoreCase("inclined")) {
+                sender.sendMessage("§cInvalid layout. Use straight or inclined.");
                 return true;
             }
         }
@@ -172,6 +215,19 @@ public class FBCommand implements CommandExecutor {
         }
 
         sender.sendMessage("§aArena " + arena.getName() + " created with " + arena.getIslandCount() + " islands.");
+        // Only ever reached right after a genuinely NEW arena is created (arenaExists() above
+        // already returned early otherwise) - never during arena loading at startup, so existing
+        // arenas are never retroactively added on a later /fb reload or server restart.
+        try {
+            configManager.autoAddModeToSwitcherMenuIfEnabled(arena.getName());
+        } catch (Throwable ignored) {
+        }
+        try {
+            // Seeds this brand-new arena's arena_settings.yml entry (start/finish/direction) right
+            // away - direction defaults to whatever straight/inclined was just chosen above.
+            configManager.ensureArenaSettingsEntryExists();
+        } catch (Throwable ignored) {
+        }
         return true;
     }
 
@@ -758,16 +814,28 @@ public class FBCommand implements CommandExecutor {
     }
 
     /**
-     * /fb lb list <arena> - shows the top 10 for that mode, with '-.--' placeholders for any empty
-     * slots. Works even if nothing has ever been added to that mode's leaderboard yet.
+     * /fb lb list <arena> [verified|unverified] - shows the top 10 for that mode, with '-.--'
+     * placeholders for any empty slots. Works even if nothing has ever been added to that mode's
+     * leaderboard yet. The type argument picks which board to show: "verified" (default, unchanged
+     * from before - the admin-placed board) or "unverified" (the automatic, player-qualified
+     * board). Same rendering either way; only the top line's tag differs.
      */
     private boolean handleLeaderboardList(CommandSender sender, String[] args) {
         if (args.length < 3) {
-            sender.sendMessage("§cUsage: /fb lb list <arena>");
+            sender.sendMessage("§cUsage: /fb lb list <mode> [verified|unverified]");
             return true;
         }
         String mode = args[2];
-        for (String line : leaderboardManager.getLeaderboardLines(mode)) {
+        LeaderboardManager.LeaderboardType type = LeaderboardManager.LeaderboardType.VERIFIED;
+        if (args.length >= 4) {
+            LeaderboardManager.LeaderboardType parsed = LeaderboardManager.LeaderboardType.fromArgument(args[3]);
+            if (parsed == null) {
+                sender.sendMessage("§cUnknown leaderboard type '" + args[3] + "'. Use 'verified' or 'unverified'.");
+                return true;
+            }
+            type = parsed;
+        }
+        for (String line : leaderboardManager.getLeaderboardLines(type, mode)) {
             sender.sendMessage(line);
         }
         return true;
@@ -862,7 +930,7 @@ public class FBCommand implements CommandExecutor {
                 "&6SkepiFB Commands",
                 "&7Staff Commands",
                 "&f/fb help &7- Shows this menu",
-                "&f/fb add <arena> <schematic> <islandCount> [spacing] [straight|diagonal] &7- Adds a new arena",
+                "&f/fb add <arena> <schematic> <islandCount> [spacing] [straight|inclined] &7- Adds a new arena",
                 "&f/fb remove <arena> &7- Removes an arena",
                 "&f/fb setfacing <arena> &7- Sets the spawn/respawn facing direction for an arena to your current facing",
                 "&f/fb list &7- Lists arenas",
@@ -876,10 +944,11 @@ public class FBCommand implements CommandExecutor {
                 "&f/fb xp add/remove/set <player> <amount> &7- Edits player XP and updates rank UI",
                 "&f/fb lb add <user> <mode> <time> &7- Adds/updates a leaderboard entry",
                 "&f/fb lb remove <user> <mode> <time> &7- Removes a leaderboard entry",
-                "&f/fb lb list <mode> &7- Shows a mode's leaderboard",
+                "&f/fb lb list <mode> [verified|unverified] &7- Shows a mode's leaderboard",
                 "&f/fb lb user <mode> <player> <position> <score> &7- Manually sets a position",
                 "&f/fb island add/remove/list ... &7- Manages island cosmetics",
-                "&f/fb test setspawn/start/exit &7- Runs test mode commands"
+                "&f/fb test setspawn/start/exit &7- Runs test mode commands",
+                "&f/fb spectate <player|exit> &7- Spectates a player (same as /spectate, /spec)"
         );
         List<String> lines = plugin.getConfigManager().getConfiguration().getStringList("help.message");
         if (lines == null || lines.isEmpty()) {
@@ -938,6 +1007,26 @@ public class FBCommand implements CommandExecutor {
         hotbarManager.reload();
         scoreboardManager.reload();
         plugin.getShopManager().reload();
+        try {
+            plugin.getPermissionsManager().reload();
+        } catch (Throwable ignored) {
+        }
+        // Previously missing entirely: menus/stats_menu.yml was never re-read on /fb reload, so
+        // any edit to it (border, title, per-arena "action: stats" items, etc.) required a full
+        // server restart to take effect, which looked exactly like the file just being ignored.
+        // Also re-materializes entries for any arena added since the last reload/startup.
+        try {
+            plugin.getStatsMenuManager().reload();
+        } catch (Throwable ignored) {
+        }
+        // menus/leaderboard_menu.yml follows the exact same pattern - re-read its border/title/
+        // toggle/close/all-modes styling on every /fb reload rather than requiring a restart. Does
+        // not touch a leaderboard menu a player already has open (same limitation stats/shop menus
+        // have) - they'll see the refreshed styling next time they open it with /lb or /leaderboard.
+        try {
+            plugin.getLeaderboardMenuManager().reload();
+        } catch (Throwable ignored) {
+        }
         // reload() above only re-reads shop.yml/shop_stats.yml into memory - it does not touch any
         // shop GUI a player already has open, since that inventory's contents were rendered once at
         // open-time and never automatically redraw just because the backing config changed. Without
@@ -953,7 +1042,20 @@ public class FBCommand implements CommandExecutor {
             plugin.getStatboardManager().updateAll();
         } catch (Throwable ignored) {
         }
-        sender.sendMessage("§aReload complete. Arena, config, hotbar, scoreboard, shop and statboard settings have been refreshed.");
+        // Clears every island NPC and immediately re-spawns one for each currently-occupied
+        // island, picking up any config.yml change (name/offset/enabled/click-menu) right away.
+        try {
+            plugin.getIslandNpcManager().resyncAll();
+        } catch (Throwable ignored) {
+        }
+        // Restarts the periodic chat message timer so an edited "periodic-messages.interval-
+        // seconds" (or messages list) takes effect immediately, instead of requiring a full
+        // server restart. start() re-reads the interval from config.yml each time it's called.
+        try {
+            plugin.getPeriodicMessageManager().start();
+        } catch (Throwable ignored) {
+        }
+        sender.sendMessage("§aReload complete. Arena, config, hotbar, scoreboard, shop, statboard, stats menu and leaderboard menu settings have been refreshed.");
         return true;
     }
 }

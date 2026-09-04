@@ -6,8 +6,10 @@ import me.skepi.skepifb.arena.ArenaIsland;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.Location;
+import org.bukkit.NamespacedKey;
 import org.bukkit.entity.ArmorStand;
 import org.bukkit.entity.Player;
+import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import java.util.*;
@@ -17,14 +19,23 @@ import java.util.Locale;
 
 public class StatboardManager {
 
+    // Marks every armor stand this class spawns as ours, independent of this session's in-memory
+    // tracking maps below - see SkepiFBPlugin#removeLeftoverManagedEntities() for why that
+    // distinction matters (it's what lets a leftover hologram from an unclean previous shutdown
+    // get found and removed on the next startup, instead of persisting forever).
+    private static final String HOLOGRAM_TAG_VALUE = "statboard";
+
     private final JavaPlugin plugin;
     private final SkepiFBPlugin main;
+    private final NamespacedKey hologramKey;
     private final Map<UUID, List<ArmorStand>> statboards = new ConcurrentHashMap<>();
+    private final Map<UUID, Location> statboardBases = new ConcurrentHashMap<>();
     private int taskId = -1;
 
     public StatboardManager(JavaPlugin plugin) {
         this.plugin = plugin;
         this.main = (SkepiFBPlugin) plugin;
+        this.hologramKey = new NamespacedKey(plugin, "skepifb_hologram");
         scheduleUpdater();
     }
 
@@ -69,15 +80,7 @@ public class StatboardManager {
                 .add(rightX * rightDistance, upDistance, rightZ * rightDistance)
                 .add(forwardX * forwardDistance, 0.0, forwardZ * forwardDistance);
 
-        List<String> lines = main.getConfigManager().getConfiguration().getStringList("statboard.lines");
-        if (lines == null || lines.isEmpty()) lines = List.of(
-                "%player%&f's Statboard",
-                "&e&lBridging Statistics &7- &e%mode%",
-                "&bPersonal Best &7- &e%pb% &7[&bTop &e%top%&7]",
-                "&bAverage Time &7- &e%averagetime%",
-                "&bCompletions &7- &e%completions%",
-                "&bAttempts &7- &e%attempts%"
-        );
+        List<String> lines = buildStatboardLines(playerUuid);
 
         List<ArmorStand> stands = new ArrayList<>();
         for (int i = 0; i < lines.size(); i++) {
@@ -90,7 +93,8 @@ public class StatboardManager {
                     asn.setGravity(false);
                     try { asn.setMarker(true); } catch (Throwable ignored) {}
                     asn.setCustomNameVisible(true);
-                    asn.setCustomName(replacePlaceholders(playerUuid, lineText));
+                    asn.setCustomName(safeArmorStandName(replacePlaceholders(playerUuid, lineText)));
+                    asn.getPersistentDataContainer().set(hologramKey, PersistentDataType.STRING, HOLOGRAM_TAG_VALUE);
                 });
                 if (as != null) {
                     stands.add(as);
@@ -102,13 +106,150 @@ public class StatboardManager {
 
         if (!stands.isEmpty()) {
             statboards.put(playerUuid, stands);
+            statboardBases.put(playerUuid, hologramBase);
         }
+    }
+
+    /**
+     * Builds this player's full set of statboard lines by rendering each named section from
+     * "statboard.order" (top to bottom) and stitching them together, skipping any section that
+     * renders no lines at all (e.g. "leaderboard" for a player with no placements) - a skipped
+     * section contributes no gap either, so two sections are never separated by more blank space
+     * than "statboard.section-spacing" configures. New sections can be added to buildSection()
+     * later and immediately become orderable via "statboard.order" without anything else changing.
+     */
+    private List<String> buildStatboardLines(UUID playerUuid) {
+        List<String> order = readSectionOrder();
+        int spacing = Math.max(0, main.getConfigManager().getConfiguration().getInt("statboard.section-spacing", 2));
+
+        List<String> combined = new ArrayList<>();
+        for (String sectionName : order) {
+            List<String> sectionLines = buildSection(sectionName, playerUuid);
+            if (sectionLines.isEmpty()) {
+                continue;
+            }
+            if (!combined.isEmpty()) {
+                for (int i = 0; i < spacing; i++) {
+                    combined.add("");
+                }
+            }
+            combined.addAll(sectionLines);
+        }
+
+        if (combined.isEmpty()) {
+            // Every configured section rendered empty (e.g. a typo'd order list) - always fall
+            // back to the stats section so the hologram never ends up completely blank.
+            combined.addAll(buildStatsSectionLines());
+        }
+        return combined;
+    }
+
+    /**
+     * "statboard.order" - which named sections appear in the statboard hologram and in what order,
+     * top to bottom. Accepts either a normal YAML list:
+     *   order:
+     *     - "leaderboard"
+     *     - "stats"
+     * or, since a plain comma-separated line is sometimes easier to hand-edit, a single string:
+     *   order: "leaderboard, stats"
+     * Falls back to the default order (leaderboard, then stats) if the key is missing, empty, or
+     * unreadable.
+     */
+    private List<String> readSectionOrder() {
+        Object raw = main.getConfigManager().getConfiguration().get("statboard.order");
+        List<String> order = new ArrayList<>();
+        if (raw instanceof List<?> rawList) {
+            for (Object entry : rawList) {
+                if (entry == null) continue;
+                String value = entry.toString().trim();
+                if (!value.isEmpty()) order.add(value);
+            }
+        } else if (raw instanceof String rawString) {
+            for (String part : rawString.split(",")) {
+                String value = part.trim();
+                if (!value.isEmpty()) order.add(value);
+            }
+        }
+        if (order.isEmpty()) {
+            order.add("leaderboard");
+            order.add("stats");
+        }
+        return order;
+    }
+
+    private List<String> buildSection(String sectionName, UUID playerUuid) {
+        if (sectionName == null) return List.of();
+        switch (sectionName.trim().toLowerCase(Locale.ROOT)) {
+            case "leaderboard":
+                return buildLeaderboardSectionLines(playerUuid);
+            case "stats":
+                return buildStatsSectionLines();
+            default:
+                return List.of();
+        }
+    }
+
+    private List<String> buildStatsSectionLines() {
+        List<String> statLines = main.getConfigManager().getConfiguration().getStringList("statboard.lines");
+        if (statLines == null || statLines.isEmpty()) statLines = List.of(
+                "%player%&f's Statboard",
+                "&e&lBridging Statistics &7- &e%mode%",
+                "&bPersonal Best &7- &e%pb% &7[&bTop &e%top%&7]",
+                "&bAverage Time &7- &e%averagetime%",
+                "&bCompletions &7- &e%completions%",
+                "&bAttempts &7- &e%attempts%"
+        );
+        return statLines;
+    }
+
+    /**
+     * Renders the leaderboard section for a player: an empty list (meaning "don't show this
+     * section at all", and contribute no separator gap either - see buildStatboardLines) if the
+     * feature is disabled or the player holds no leaderboard placements at all, otherwise the
+     * configured title line followed by one line per placement, each rendered from
+     * "statboard.leaderboard.line-format" with {PLACE}/{MODE}/{TIME} substituted.
+     */
+    private List<String> buildLeaderboardSectionLines(UUID playerUuid) {
+        List<String> lines = new ArrayList<>();
+        if (playerUuid == null) return lines;
+        if (!main.getConfigManager().getConfiguration().getBoolean("statboard.leaderboard.enabled", true)) return lines;
+
+        List<me.skepi.skepifb.leaderboard.LeaderboardManager.PlayerLeaderboardEntry> entries =
+                main.getLeaderboardManager().getPlayerLeaderboardEntries(playerUuid);
+        if (entries.isEmpty()) return lines;
+
+        String title = main.getConfigManager().getConfiguration().getString("statboard.leaderboard.title", "&d&lGLOBAL LEADERBOARD PLAYER");
+        String lineFormat = main.getConfigManager().getConfiguration().getString("statboard.leaderboard.line-format", "&b#{PLACE} &eon {MODE} Mode &7- &b{TIME}");
+
+        if (title != null && !title.isBlank()) {
+            lines.add(title);
+        }
+        for (me.skepi.skepifb.leaderboard.LeaderboardManager.PlayerLeaderboardEntry entry : entries) {
+            String rendered = lineFormat
+                    .replace("{PLACE}", String.valueOf(entry.getPosition()))
+                    .replace("{MODE}", entry.getModeDisplayName())
+                    .replace("{TIME}", String.format(Locale.ROOT, "%.3f", entry.getScore()));
+            lines.add(rendered);
+        }
+        return lines;
+    }
+
+    /**
+     * A blank line (used as a spacer between statboard sections, or a genuinely blank configured
+     * line) becomes an empty string after color-code translation. Passing an empty string to
+     * ArmorStand#setCustomName does NOT hide the nametag - the client falls back to showing the
+     * entity's own default name ("Armor Stand") instead, since Minecraft treats an empty custom
+     * name as "no custom name set" rather than "custom name is blank". A single space renders as a
+     * true blank line while still counting as "a custom name is set".
+     */
+    private String safeArmorStandName(String text) {
+        return (text == null || text.isEmpty()) ? " " : text;
     }
 
     public void removeStatboard(UUID playerUuid) {
         if (playerUuid == null) return;
-        Player player = Bukkit.getPlayer(playerUuid);
         List<ArmorStand> stands = statboards.remove(playerUuid);
+        statboardBases.remove(playerUuid);
         if (stands == null) return;
         for (ArmorStand as : stands) {
             try { as.remove(); } catch (Throwable ignored) {}
@@ -131,12 +272,64 @@ public class StatboardManager {
             removeStatboard(playerUuid);
             return;
         }
-        List<String> lines = main.getConfigManager().getConfiguration().getStringList("statboard.lines");
-        if (lines == null) lines = List.of();
+        List<String> lines = buildStatboardLines(playerUuid);
+
+        if (lines.size() != stands.size()) {
+            // The leaderboard section can appear/disappear or grow/shrink live (a player gains or
+            // loses a placement while standing on their island), which changes the total line
+            // count - respawn every armorstand at the same hologram base rather than trying to
+            // patch a mismatched line count onto the old stand count.
+            rebuildStatboardArmorstands(playerUuid, lines);
+            return;
+        }
+
         for (int i = 0; i < stands.size(); i++) {
             ArmorStand as = stands.get(i);
             String text = i < lines.size() ? replacePlaceholders(playerUuid, lines.get(i)) : "";
-            try { as.setCustomName(text); } catch (Throwable ignored) {}
+            try { as.setCustomName(safeArmorStandName(text)); } catch (Throwable ignored) {}
+        }
+    }
+
+    private void rebuildStatboardArmorstands(UUID playerUuid, List<String> lines) {
+        Location hologramBase = statboardBases.get(playerUuid);
+        List<ArmorStand> oldStands = statboards.get(playerUuid);
+        if (hologramBase == null || hologramBase.getWorld() == null) {
+            removeStatboard(playerUuid);
+            return;
+        }
+        if (oldStands != null) {
+            for (ArmorStand as : oldStands) {
+                try { as.remove(); } catch (Throwable ignored) {}
+            }
+        }
+
+        List<ArmorStand> stands = new ArrayList<>();
+        for (int i = 0; i < lines.size(); i++) {
+            int lineIndex = i;
+            String lineText = lines.get(i);
+            Location loc = hologramBase.clone().add(0, (lines.size() - lineIndex - 1) * 0.25, 0);
+            try {
+                ArmorStand as = hologramBase.getWorld().spawn(loc, ArmorStand.class, asn -> {
+                    asn.setVisible(false);
+                    asn.setGravity(false);
+                    try { asn.setMarker(true); } catch (Throwable ignored) {}
+                    asn.setCustomNameVisible(true);
+                    asn.setCustomName(safeArmorStandName(replacePlaceholders(playerUuid, lineText)));
+                    asn.getPersistentDataContainer().set(hologramKey, PersistentDataType.STRING, HOLOGRAM_TAG_VALUE);
+                });
+                if (as != null) {
+                    stands.add(as);
+                }
+            } catch (Throwable ex) {
+                plugin.getLogger().warning("Failed to spawn statboard armorstand: " + ex.getMessage());
+            }
+        }
+
+        if (!stands.isEmpty()) {
+            statboards.put(playerUuid, stands);
+        } else {
+            statboards.remove(playerUuid);
+            statboardBases.remove(playerUuid);
         }
     }
 

@@ -28,6 +28,8 @@ public final class ReplayManager {
     private final SkepiFBPlugin plugin;
     private final Path replayRoot;
     private final Map<String, Integer> replayCounters = new HashMap<>();
+    private final Map<UUID, Path> replayFileIndex = new HashMap<>();
+    private volatile boolean replayIndexFullyBuilt = false;
 
     public ReplayManager(SkepiFBPlugin plugin) {
         this.plugin = plugin;
@@ -44,12 +46,58 @@ public final class ReplayManager {
     }
 
     public ReplayMetadata recordReplay(UUID playerUuid, String arenaName, String playerName, double durationSeconds, int blocksPlaced, List<ReplayFrame> frames, boolean wasPersonalBest) {
+        return recordReplay(playerUuid, arenaName, playerName, durationSeconds, blocksPlaced, frames, wasPersonalBest, null);
+    }
+
+    /**
+     * Same as the 7-arg overload, but also prunes this player/arena's replays down to their
+     * resolved replay-count tier (permissions.yml) immediately afterward - the favorited replay
+     * and the current personal-best replay, if any, are never auto-deleted by this, only ordinary
+     * ones beyond the cap, oldest first. Pass the online Player so the permission check has
+     * someone to check against; pass null (see the other overload) to skip pruning entirely
+     * (e.g. if the caller doesn't have a live Player reference).
+     */
+    public ReplayMetadata recordReplay(UUID playerUuid, String arenaName, String playerName, double durationSeconds, int blocksPlaced, List<ReplayFrame> frames, boolean wasPersonalBest, org.bukkit.entity.Player player) {
         UUID replayId = UUID.randomUUID();
         int replayIndex = getNextReplayIndex(playerUuid, arenaName);
         long timestamp = Instant.now().toEpochMilli();
         ReplayMetadata metadata = new ReplayMetadata(replayId, arenaName, timestamp, durationSeconds, blocksPlaced, playerUuid, playerName, replayIndex, wasPersonalBest);
         saveReplay(playerUuid, metadata, frames);
+        if (player != null) {
+            pruneReplaysToTierLimit(player, playerUuid, arenaName);
+        }
         return metadata;
+    }
+
+    /**
+     * Deletes the oldest replays for this player/arena beyond their resolved replay-count tier
+     * limit. Never deletes the currently-favorited replay or the current personal-best replay,
+     * even if they happen to be among the oldest - those are exactly the two a player is least
+     * likely to want auto-deleted.
+     */
+    private void pruneReplaysToTierLimit(org.bukkit.entity.Player player, UUID playerUuid, String arenaName) {
+        try {
+            int limit = plugin.getPermissionsManager().resolveReplayTier(player).replayCount;
+            List<ReplayMetadata> replays = listReplayMetadata(playerUuid, arenaName);
+            if (replays.size() <= limit) {
+                return;
+            }
+            UUID favoriteId = getFavoriteReplay(playerUuid, arenaName).map(ReplayMetadata::getReplayId).orElse(null);
+            UUID pbId = getCurrentPersonalBestReplay(playerUuid, arenaName).map(ReplayMetadata::getReplayId).orElse(null);
+            replays.sort(Comparator.comparingInt(ReplayMetadata::getReplayIndex));
+            int toDelete = replays.size() - limit;
+            for (ReplayMetadata metadata : replays) {
+                if (toDelete <= 0) {
+                    break;
+                }
+                if (metadata.getReplayId().equals(favoriteId) || metadata.getReplayId().equals(pbId)) {
+                    continue;
+                }
+                deleteReplay(playerUuid, arenaName, metadata.getReplayIndex());
+                toDelete--;
+            }
+        } catch (Throwable ignored) {
+        }
     }
 
     private int getNextReplayIndex(UUID playerUuid, String arenaName) {
@@ -110,6 +158,7 @@ public final class ReplayManager {
         Path replayFile = arenaFolder.resolve(filename);
         try (Writer writer = Files.newBufferedWriter(replayFile, StandardCharsets.UTF_8)) {
             writeYamlReplay(writer, metadata, frames);
+            replayFileIndex.put(metadata.getReplayId(), replayFile);
         } catch (IOException e) {
             plugin.getLogger().warning("Failed to save replay file " + replayFile + ": " + e.getMessage());
         }
@@ -149,9 +198,20 @@ public final class ReplayManager {
             double outY = frame.getY();
             double outZ = frame.getZ();
             if (writeRelative) {
-                outX = frame.getX() - originX;
+                // Player-position relative coordinates must be computed against the same
+                // floored block origin the block-placement/break relative coordinates below
+                // already use (Math.floor(originX/originZ)) - NOT the raw spawn.getX()/getZ(),
+                // which is offset by +0.5 (islands spawn at block-center, see
+                // Arena#calculateSpawn). Subtracting the un-floored, center-offset origin here
+                // shifted every recorded X/Z decimal by 0.5 versus the player's real fractional
+                // position (Y was never affected since island spawn Y has no +0.5 offset), which
+                // is the ".500 off" relative-coordinate bug on the replay hologram. Flooring
+                // originX/originZ here (matching the placements/breaks below) keeps the decimal
+                // portion of X/Z identical to the player's real position, only shifting the
+                // whole-number part, exactly like Y already behaved.
+                outX = frame.getX() - Math.floor(originX);
                 outY = frame.getY() - originY;
-                outZ = frame.getZ() - originZ;
+                outZ = frame.getZ() - Math.floor(originZ);
                 frame.setCoordinatesRelative(true);
             }
             writer.write("    x: " + String.format(Locale.ROOT, "%.3f", outX) + "\n");
@@ -161,6 +221,10 @@ public final class ReplayManager {
             writer.write("    pitch: " + String.format(Locale.ROOT, "%.3f", frame.getPitch()) + "\n");
             writer.write("    sneaking: " + frame.isSneaking() + "\n");
             writer.write("    sprinting: " + frame.isSprinting() + "\n");
+            writer.write("    ping: " + frame.getPing() + "\n");
+            writer.write("    leftCps: " + frame.getLeftCps() + "\n");
+            writer.write("    rightCps: " + frame.getRightCps() + "\n");
+            writer.write("    jumpTicks: " + frame.getJumpTicks() + "\n");
             writer.write("    heldMaterial: " + quote(frame.getHeldMaterial()) + "\n");
             writer.write("    armSwings:\n");
             for (String swing : frame.getArmSwings()) {
@@ -385,6 +449,23 @@ public final class ReplayManager {
         return Optional.ofNullable(best);
     }
 
+    /**
+     * Returns the most recently recorded replay (highest replayIndex) for a player/arena, used by
+     * the "Last Attempt" shortcut slot in the replay menu.
+     */
+    public Optional<ReplayMetadata> getMostRecentReplay(UUID playerUuid, String arenaName) {
+        if (playerUuid == null || arenaName == null) {
+            return Optional.empty();
+        }
+        ReplayMetadata mostRecent = null;
+        for (ReplayMetadata metadata : listReplayMetadata(playerUuid, arenaName)) {
+            if (mostRecent == null || metadata.getReplayIndex() > mostRecent.getReplayIndex()) {
+                mostRecent = metadata;
+            }
+        }
+        return Optional.ofNullable(mostRecent);
+    }
+
     public double getAverageArenaCompletionTime(String arenaName) {
         java.util.List<ReplayMetadata> replays = listArenaReplayMetadata(arenaName);
         if (replays.isEmpty()) {
@@ -446,6 +527,7 @@ public final class ReplayManager {
         Path failedFile = arenaFolder.resolve("failed_replay.yml");
         try (Writer writer = Files.newBufferedWriter(failedFile, StandardCharsets.UTF_8)) {
             writeYamlReplay(writer, metadata, frames);
+            replayFileIndex.put(metadata.getReplayId(), failedFile);
         } catch (IOException e) {
             plugin.getLogger().warning("Failed to save failed replay file " + failedFile + ": " + e.getMessage());
         }
@@ -509,7 +591,66 @@ public final class ReplayManager {
         Path replayFile = replayRoot.resolve(playerUuid.toString()).resolve(arenaName).resolve(String.format("replay_%06d.yml", replayIndex));
         try {
             Files.deleteIfExists(replayFile);
+            replayFileIndex.values().removeIf(indexedPath -> indexedPath.equals(replayFile));
         } catch (IOException ignored) {
+        }
+    }
+
+    /**
+     * Resolves any replay purely by its global replayId (the UUID every replay is stamped with
+     * at creation time - see recordReplay/saveFailedReplay and ReplayMetadata) - without needing
+     * to already know which player or arena it belongs to. This is what backs "action: replay" /
+     * "replayid: ..." items: point one at any replay's ID from any menu and it opens directly,
+     * with no other configuration needed.
+     * <p>
+     * Backed by an in-memory index built lazily (once, on first lookup) from the first line of
+     * every replay file under replays/ - cheap, since "replayId:" is always written as line 1 of
+     * every replay file - and kept up to date incrementally afterward as replays are recorded
+     * (saveReplay/saveFailedReplay) or pruned (deleteReplay above), so a fresh full scan is rarely
+     * needed again after the first call.
+     */
+    public Optional<ReplayMetadata> findReplayById(UUID replayId) {
+        if (replayId == null) {
+            return Optional.empty();
+        }
+        Path cached = replayFileIndex.get(replayId);
+        if (cached != null) {
+            if (Files.exists(cached)) {
+                return readMetadataFromFile(cached);
+            }
+            replayFileIndex.remove(replayId);
+        }
+        if (!replayIndexFullyBuilt) {
+            rebuildReplayIndex();
+        }
+        Path found = replayFileIndex.get(replayId);
+        return found == null ? Optional.empty() : readMetadataFromFile(found);
+    }
+
+    private void rebuildReplayIndex() {
+        replayFileIndex.clear();
+        try {
+            if (Files.exists(replayRoot)) {
+                try (java.util.stream.Stream<Path> stream = Files.walk(replayRoot)) {
+                    stream.filter(Files::isRegularFile)
+                            .filter(p -> p.getFileName().toString().endsWith(".yml"))
+                            .forEach(this::indexReplayFile);
+                }
+            }
+        } catch (IOException e) {
+            plugin.getLogger().warning("Failed to index replays for lookup-by-ID: " + e.getMessage());
+        }
+        replayIndexFullyBuilt = true;
+    }
+
+    private void indexReplayFile(Path file) {
+        try (java.io.BufferedReader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
+            String firstLine = reader.readLine();
+            if (firstLine != null && firstLine.startsWith("replayId:")) {
+                UUID id = UUID.fromString(firstLine.substring("replayId:".length()).trim());
+                replayFileIndex.put(id, file);
+            }
+        } catch (IOException | IllegalArgumentException ignored) {
         }
     }
 
@@ -566,6 +707,25 @@ public final class ReplayManager {
                     try { current.setRotation(Float.parseFloat(trimmed.substring("yaw:".length()).trim()), current.getPitch()); } catch (NumberFormatException ignored) {}
                 } else if (section == null && trimmed.startsWith("pitch:")) {
                     try { current.setRotation(current.getYaw(), Float.parseFloat(trimmed.substring("pitch:".length()).trim())); } catch (NumberFormatException ignored) {}
+                } else if (section == null && trimmed.startsWith("ping:")) {
+                    try {
+                        int ping = Integer.parseInt(trimmed.substring("ping:".length()).trim());
+                        current.setReplayStats(ping, current.getLeftCps(), current.getRightCps());
+                    } catch (NumberFormatException ignored) {}
+                } else if (section == null && trimmed.startsWith("leftCps:")) {
+                    try {
+                        int leftCps = Integer.parseInt(trimmed.substring("leftCps:".length()).trim());
+                        current.setReplayStats(current.getPing(), leftCps, current.getRightCps());
+                    } catch (NumberFormatException ignored) {}
+                } else if (section == null && trimmed.startsWith("rightCps:")) {
+                    try {
+                        int rightCps = Integer.parseInt(trimmed.substring("rightCps:".length()).trim());
+                        current.setReplayStats(current.getPing(), current.getLeftCps(), rightCps);
+                    } catch (NumberFormatException ignored) {}
+                } else if (section == null && trimmed.startsWith("jumpTicks:")) {
+                    try {
+                        current.setJumpTicks(Integer.parseInt(trimmed.substring("jumpTicks:".length()).trim()));
+                    } catch (NumberFormatException ignored) {}
                 } else if (section == null && trimmed.startsWith("heldMaterial:")) {
                     current.setHeldMaterial(unquote(trimmed.substring("heldMaterial:".length()).trim()));
                 } else if (trimmed.startsWith("armSwings:")) {

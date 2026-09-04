@@ -711,6 +711,8 @@ public class ShopManager implements Listener {
 
         String translatedName = ChatColor.translateAlternateColorCodes('&', itemDefinition.getName());
         boolean owned = isOwned(player.getUniqueId(), itemDefinition);
+        boolean permissionLocked = plugin instanceof SkepiFBPlugin sfb
+                && !sfb.getPermissionsManager().canPurchaseShopItem(player, itemDefinition.getShopKey(), itemDefinition.getCategoryKey(), itemDefinition.getKey());
         String displayName;
         List<String> lore = new ArrayList<>();
         List<String> configuredLore = itemDefinition.getLore();
@@ -766,18 +768,23 @@ public class ShopManager implements Listener {
                 lore.add(ChatColor.GRAY + "Rankup display item");
             }
         } else {
-            displayName = (owned ? ChatColor.GREEN : ChatColor.YELLOW) + translatedName;
+            displayName = (permissionLocked ? ChatColor.RED : (owned ? ChatColor.GREEN : ChatColor.YELLOW)) + translatedName;
+            if (permissionLocked) {
+                lore.add(ChatColor.RED + "Requires special permission");
+            }
             lore.add(ChatColor.GRAY + "Price: " + ChatColor.GOLD + itemDefinition.getPrice() + " coins");
             if (owned) {
                 lore.add(ChatColor.GREEN + "Owned");
                 if (isSelected) {
                     lore.add(ChatColor.GREEN + "Currently Selected");
-                } else {
+                } else if (!permissionLocked) {
                     lore.add(ChatColor.YELLOW + "Click to equip");
                 }
             } else {
                 lore.add(ChatColor.RED + "Not owned");
-                lore.add(ChatColor.YELLOW + "Click to purchase");
+                if (!permissionLocked) {
+                    lore.add(ChatColor.YELLOW + "Click to purchase");
+                }
             }
             if (itemDefinition.isDefaultItem()) {
                 lore.add(ChatColor.AQUA + "Starter item");
@@ -1234,6 +1241,17 @@ public class ShopManager implements Listener {
             equipItem(playerUuid, itemDefinition, player);
             logPlayerRelatedState(player, main, "AFTER purchaseOrEquip (selection cleared)");
             player.sendMessage(ChatColor.YELLOW + "Selection cleared.");
+            return true;
+        }
+
+        // Optional extra permission gate on top of the normal coin price (permissions.yml
+        // "shop-items:" section). Checked for both purchasing AND re-equipping an already-owned
+        // item, so revoking a permission actually revokes access to that cosmetic, not just the
+        // ability to buy it again.
+        if (!main.getPermissionsManager().canPurchaseShopItem(player, shopId, categoryKey, itemKey)) {
+            String msg = ChatColor.translateAlternateColorCodes('&',
+                    main.getConfigManager().getConfiguration().getString("no-permission-message", "&cYou do not have permission to do that."));
+            player.sendMessage(msg);
             return true;
         }
 
